@@ -114,55 +114,70 @@
         let myName = "";
         let isHost = false;
 
-        // --- NÁPOVĚDA ---
+        // --- NÁPOVĚDA A PRAVIDLA ---
         function showHelp() {
             Swal.fire({
-                title: '<span class="text-2xl font-black text-white"><i class="fa-solid fa-book-open text-sky-400 mr-2"></i> Nápověda k rolím</span>',
+                title: '<span class="text-2xl font-black text-white"><i class="fa-solid fa-book-open text-sky-400 mr-2"></i> Pravidla a Nápověda</span>',
                 html: `
-                    <div class="text-left space-y-4 text-sm text-slate-300 max-h-96 overflow-y-auto pr-2 custom-scrollbar">
-                        <p class="mb-4">Cílem <b>Města</b> je odhalit a popravit u soudu všechny mafiány. Cílem <b>Mafie</b> je přečíslit měšťany.</p>
+                    <div class="text-left space-y-4 text-sm text-slate-300 max-h-[65vh] overflow-y-auto pr-2 custom-scrollbar">
                         
-                        <div class="border-t border-slate-700 pt-3">
-                            <h4 class="font-bold text-rose-500 mb-1 text-base"><i class="fa-solid fa-user-secret w-5"></i> Mafián</h4>
-                            V noci vybírá cíl k zabití. (Pokud je zapnutá "Jednomyslná shoda", musí všichni mafiáni zvolit stejný dům).
-                        </div>
-                        <div class="border-t border-slate-700 pt-3">
-                            <h4 class="font-bold text-blue-400 mb-1 text-base"><i class="fa-solid fa-user-shield w-5"></i> Policista</h4>
-                            V noci zablokuje hráče. Pokud se cíl chystal v noci opustit dům, policie ho zastaví a jeho akce se neprovede.
-                        </div>
-                        <div class="border-t border-slate-700 pt-3">
-                            <h4 class="font-bold text-emerald-400 mb-1 text-base"><i class="fa-solid fa-shoe-prints w-5"></i> Stopař</h4>
-                            Zjistí, ke komu vybraný hráč v noci šel. Pokud cíl nikam nešel, najde jen prázdnou stopu.
-                        </div>
-                        <div class="border-t border-slate-700 pt-3">
-                            <h4 class="font-bold text-amber-500 mb-1 text-base"><i class="fa-solid fa-spider w-5"></i> Pastičkář</h4>
-                            Nastraží k někomu (nebo k sobě) past. První člověk s rolí, který do domu vstoupí, se chytí, nic neprovede a pastičkář zjistí jeho jméno.
-                        </div>
-                        <div class="border-t border-slate-700 pt-3">
-                            <h4 class="font-bold text-cyan-400 mb-1 text-base"><i class="fa-solid fa-magnifying-glass w-5"></i> Detektiv</h4>
-                            Zkoumá hráče. Ráno dostane 2 možné role – jedna z nich je stoprocentně ta pravá.
-                        </div>
-                        <div class="border-t border-slate-700 pt-3">
-                            <h4 class="font-bold text-green-400 mb-1 text-base"><i class="fa-solid fa-user-doctor w-5"></i> Doktor</h4>
-                            Hlídá u někoho doma. Pokud k němu přijde zabíjet mafie, cíl přežije noc.
-                        </div>
-                        <div class="border-t border-slate-700 pt-3">
-                            <h4 class="font-bold text-yellow-300 mb-1 text-base"><i class="fa-solid fa-scale-balanced w-5"></i> Starosta</h4>
-                            Nemá žádnou noční akci, ale u denního soudu se jeho hlas počítá automaticky za dva.
-                        </div>
-                        <div class="border-t border-slate-700 pt-3">
-                            <h4 class="font-bold text-fuchsia-400 mb-1 text-base"><i class="fa-solid fa-mask-face w-5"></i> Šašek</h4>
-                            Chce jediné - být přes den upálen/oběšen! Pokud u soudu přesvědčí ostatní, aby pro něj hlasovali, okamžitě sám vyhrává celou hru.
-                        </div>
-                        <div class="border-t border-slate-700 pt-3">
-                            <h4 class="font-bold text-purple-400 mb-1 text-base"><i class="fa-solid fa-face-dizzy w-5"></i> Blázen</h4>
-                            Neví, že je blázen. Vidí, že má jinou roli (např. Policista), v noci provádí akce, ale ráno dostává od serveru naprosto smyšlené výsledky, čímž zmate nejen sebe, ale i zbytek města.
+                        <h3 class="text-lg font-bold text-white border-b border-slate-600 pb-1"><i class="fa-solid fa-scroll mr-2"></i>Jak hrát</h3>
+                        <p class="mb-2">Hra se dělí na dvě hlavní fáze:</p>
+                        <ul class="list-disc pl-5 space-y-1 mb-4">
+                            <li><b>Noc:</b> Hráči se speciálními rolemi tajně vykonávají své akce (kliknutím na dům hráče). Ostatní spí.</li>
+                            <li><b>Den:</b> Ráno se dozvíte události noci. Město volně diskutuje o tom, kdo lže, a snaží se odhalit Mafiány. Závěrem dne je <b>Soud</b>, kde se hlasuje, koho město popraví.</li>
+                        </ul>
+                        <p class="mb-4">Cílem <b>Města</b> je odhalit a popravit všechny Mafiány. Cílem <b>Mafie</b> je přežít a přečíslit Město.</p>
+
+                        <h3 class="text-lg font-bold text-white border-b border-slate-600 pb-1 mt-4"><i class="fa-solid fa-users mr-2"></i>Role ve hře</h3>
+                        
+                        <div class="space-y-3">
+                            <div>
+                                <h4 class="font-bold text-slate-300 mb-1 text-base"><i class="fa-solid fa-user w-5"></i> Měšťan</h4>
+                                Nemá žádnou noční akci. Přes den musí bedlivě poslouchat, všímat si chyb a pokusit se odhalit lháře.
+                            </div>
+                            <div class="border-t border-slate-700 pt-3">
+                                <h4 class="font-bold text-rose-500 mb-1 text-base"><i class="fa-solid fa-user-secret w-5"></i> Mafián</h4>
+                                V noci vybírá cíl k zabití. (Při zapnuté "Shodě mafie" se musí všichni mafiáni domluvit a kliknout na stejný dům, jinak útok selže).
+                            </div>
+                            <div class="border-t border-slate-700 pt-3">
+                                <h4 class="font-bold text-blue-400 mb-1 text-base"><i class="fa-solid fa-user-shield w-5"></i> Policista</h4>
+                                V noci hlídá vybraného hráče. Pokud se jeho cíl zrovna chystal odejít z domu (udělat noční akci), policie ho zastaví a jeho akce se zruší.
+                            </div>
+                            <div class="border-t border-slate-700 pt-3">
+                                <h4 class="font-bold text-emerald-400 mb-1 text-base"><i class="fa-solid fa-shoe-prints w-5"></i> Stopař</h4>
+                                Zjistí, ke komu vybraný hráč v noci šel. Pokud cíl nikam nešel (nebo nemá akci), najde Stopař jen prázdnou stopu.
+                            </div>
+                            <div class="border-t border-slate-700 pt-3">
+                                <h4 class="font-bold text-amber-500 mb-1 text-base"><i class="fa-solid fa-spider w-5"></i> Pastičkář</h4>
+                                Nastraží k někomu past. První člověk s aktivní rolí (Mafián, Doktor, Detektiv...), který do tohoto domu v noci přijde, do ní šlápne, s křikem uteče a nic nevykoná. Pastičkář se navíc dozví jeho jméno.
+                            </div>
+                            <div class="border-t border-slate-700 pt-3">
+                                <h4 class="font-bold text-cyan-400 mb-1 text-base"><i class="fa-solid fa-magnifying-glass w-5"></i> Detektiv</h4>
+                                Vyšetřuje vybraného hráče. Ráno dostane od serveru 2 možné role – jedna z nich je stoprocentně ta pravá.
+                            </div>
+                            <div class="border-t border-slate-700 pt-3">
+                                <h4 class="font-bold text-green-400 mb-1 text-base"><i class="fa-solid fa-user-doctor w-5"></i> Doktor</h4>
+                                Hlídá u někoho doma (může i u sebe). Pokud se tento cíl pokusí Mafie v noci zabít, Doktor mu zachrání život.
+                            </div>
+                            <div class="border-t border-slate-700 pt-3">
+                                <h4 class="font-bold text-yellow-300 mb-1 text-base"><i class="fa-solid fa-scale-balanced w-5"></i> Starosta</h4>
+                                Nemá noční akci, ale u denního soudu se jeho hlas automaticky počítá jako dva hlasy.
+                            </div>
+                            <div class="border-t border-slate-700 pt-3">
+                                <h4 class="font-bold text-fuchsia-400 mb-1 text-base"><i class="fa-solid fa-mask-face w-5"></i> Šašek</h4>
+                                Chce jediné - být přes den upálen/oběšen! Pokud u soudu přesvědčí ostatní, aby pro něj hlasovali, okamžitě sám vyhrává celou hru.
+                            </div>
+                            <div class="border-t border-slate-700 pt-3">
+                                <h4 class="font-bold text-purple-400 mb-1 text-base"><i class="fa-solid fa-face-dizzy w-5"></i> Blázen (Volitelně)</h4>
+                                Neví, že je blázen. Na obrazovce vidí jinou roli (např. Policista). V noci normálně provádí akce, ale ráno dostává od serveru naprosto smyšlené výsledky. Slouží k absolutnímu zmatení města.
+                            </div>
                         </div>
                     </div>
                 `,
                 background: '#1e293b',
                 color: '#fff',
-                confirmButtonColor: '#0284c7', // Sky-600
+                confirmButtonColor: '#0ea5e9', // Sky-500
                 confirmButtonText: '<i class="fa-solid fa-check mr-2"></i> Rozumím',
                 customClass: { popup: 'rounded-2xl border border-slate-700' },
                 width: '600px'
@@ -324,7 +339,6 @@
                 // VIZUÁLNÍ BARÁČKY (Grid mřížka domů)
                 html += `<div class="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-6">`;
                 data.alive_players.forEach(p => {
-                    // Do svého domu může jít jen Doktor (aby se vyléčil) a Pastičkář (nastražil si past)
                     if (p !== myName || data.role === "Doktor" || data.role === "Pastičkář") {
                         html += `
                         <div onclick="sendNightAction('${p}')" class="cursor-pointer bg-slate-800 hover:bg-indigo-700 border border-slate-700 hover:border-indigo-400 rounded-2xl p-4 flex flex-col items-center justify-center transition-all shadow-lg transform hover:-translate-y-1 group">
