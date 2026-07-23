@@ -198,7 +198,6 @@ def start_night():
     all_roles_payload = [{"name": p["name"], "role": p["actual_role"], "alive": p["alive"]} for p in game_state["players"].values()]
     
     for sid, player in game_state["players"].items():
-        # Zde odfiltrujeme aktuálního hráče ze seznamu parťáků mafie
         mates = [m for m in mafia_names if m != player["name"]] if player["actual_role"] == "Mafián" else []
         
         payload = {
@@ -412,28 +411,35 @@ def evaluate_votes():
         vote_details.setdefault(target, []).append(voter_name)
 
     eliminated = max(vote_points, key=vote_points.get)
-    res_str = f"<div class='text-2xl font-black text-white mb-2'>Oběšen byl(a): <span class='text-red-500'>{eliminated}</span></div>"
     
-    if game_state["settings"]["reveal_roles"]:
-        p = next(p for p in game_state["players"].values() if p["name"] == eliminated)
-        res_str += f"<div class='text-amber-400 font-bold mb-4'>Ukázalo se, že to byl(a): {p['actual_role']}!</div>"
+    # NOVINKA: Logika pro přeskočení hlasování
+    if eliminated == "__SKIP__":
+        res_str = f"<div class='text-2xl font-black text-slate-300 mb-2'><i class='fa-solid fa-person-walking-arrow-right mr-2'></i> Město se rozhodlo <span class='text-white'>přeskočit hlasování</span>. Nikdo nebyl oběšen!</div>"
+    else:
+        res_str = f"<div class='text-2xl font-black text-white mb-2'>Oběšen byl(a): <span class='text-red-500'>{eliminated}</span></div>"
+        if game_state["settings"]["reveal_roles"]:
+            p = next((p for p in game_state["players"].values() if p["name"] == eliminated), None)
+            if p:
+                res_str += f"<div class='text-amber-400 font-bold mb-4'>Ukázalo se, že to byl(a): {p['actual_role']}!</div>"
                 
     res_str += "<div class='space-y-2 mt-4 bg-slate-800/50 p-4 rounded-xl'>"
     for tgt, pts in sorted(vote_points.items(), key=lambda x: x[1], reverse=True):
+        tgt_name = "Přeskočit hlasování" if tgt == "__SKIP__" else tgt
         if game_state["settings"]["public_voting"]: 
-            res_str += f"<div class='text-slate-300 flex justify-between'><span class='font-bold text-white'>{tgt} ({pts} hl.)</span> <span class='text-sm italic text-slate-400'>{', '.join(vote_details[tgt])}</span></div>"
+            res_str += f"<div class='text-slate-300 flex justify-between border-b border-slate-700/50 pb-1 last:border-0'><span class='font-bold text-white'>{tgt_name} ({pts} hl.)</span> <span class='text-sm italic text-slate-400'>{', '.join(vote_details[tgt])}</span></div>"
         else: 
-            res_str += f"<div class='text-slate-300'><span class='font-bold text-white'>{tgt}:</span> {pts} hlasů</div>"
+            res_str += f"<div class='text-slate-300 border-b border-slate-700/50 pb-1 last:border-0'><span class='font-bold text-white'>{tgt_name}:</span> {pts} hlasů</div>"
     res_str += "</div>"
 
-    for p in game_state["players"].values():
-        if p["name"] == eliminated:
-            p["alive"] = False
-            if p["actual_role"] == "Šašek":
-                final_msg = res_str + "<br><div class='text-amber-500 text-3xl font-black mt-6 animate-pulse text-center'>🤡 ŠAŠEK BYL UPÁLEN A VYHRÁVÁ HRU! 🤡</div>"
-                emit('game_over', {'winner': 'Šašek', 'msg': final_msg}, broadcast=True)
-                game_state["phase"] = "Lobby"
-                return
+    if eliminated != "__SKIP__":
+        for p in game_state["players"].values():
+            if p["name"] == eliminated:
+                p["alive"] = False
+                if p["actual_role"] == "Šašek":
+                    final_msg = res_str + "<br><div class='text-amber-500 text-3xl font-black mt-6 animate-pulse text-center'>🤡 ŠAŠEK BYL UPÁLEN A VYHRÁVÁ HRU! 🤡</div>"
+                    emit('game_over', {'winner': 'Šašek', 'msg': final_msg}, broadcast=True)
+                    game_state["phase"] = "Lobby"
+                    return
 
     check_win_condition(is_night=False, custom_msg=res_str)
 
