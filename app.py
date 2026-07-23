@@ -1,472 +1,459 @@
-<!DOCTYPE html>
-<html lang="cs">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Palermo | Feign Edice</title>
-    <!-- Tailwind CSS (Design) -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <!-- FontAwesome (Ikonky) -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- SweetAlert2 (Profi vyskakovací okna) -->
-    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-    <!-- Socket.IO -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.6.1/socket.io.js"></script>
-    
-    <style>
-        body { background-color: #0f172a; color: #f8fafc; font-family: 'Inter', sans-serif; overflow-x: hidden; }
-        .glass-panel { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.1); }
-        .role-input { background: #0f172a; border: 1px solid #334155; color: #e2e8f0; text-align: center; width: 100%; border-radius: 0.5rem; padding: 0.5rem; }
-        .role-input:focus { outline: none; border-color: #3b82f6; }
-        .hide { display: none !important; }
+from flask import Flask, render_template, request
+from flask_socketio import SocketIO, emit
+import random
+
+app = Flask(__name__)
+app.config['SECRET_KEY'] = 'super-tajne-palermo-heslo'
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
+
+game_state = {
+    "players": {},
+    "host_sid": None,
+    "phase": "Lobby",
+    "votes": {},
+    "night_actions": {},
+    "settings": {}
+}
+
+ALL_ROLES = ["Měšťan", "Mafián", "Policista", "Stopař", "Pastičkář", "Doktor", "Detektiv", "Šašek", "Blázen"]
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@socketio.on('connect')
+def handle_connect():
+    emit('update_players', get_player_info())
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    sid = request.sid
+    if sid in game_state["players"]:
+        del game_state["players"][sid]
         
-        /* Hezký posuvník pro nápovědu */
-        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: rgba(0,0,0,0.2); border-radius: 4px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #64748b; }
-    </style>
-</head>
-<body class="min-h-screen flex flex-col items-center p-4 selection:bg-rose-500 selection:text-white">
+        if len(game_state["players"]) == 0:
+            game_state["phase"] = "Lobby"
+            game_state["host_sid"] = None
+            game_state["votes"] = {}
+            game_state["night_actions"] = {}
+        else:
+            if game_state["host_sid"] == sid:
+                alive_sids = list(game_state["players"].keys())
+                game_state["host_sid"] = alive_sids[0] if alive_sids else None
+                if game_state["host_sid"]:
+                    emit('host_status', {'is_host': True}, to=game_state["host_sid"])
+                    
+        emit('update_players', get_player_info(), broadcast=True)
 
-    <!-- HLAVIČKA / LOGO S NÁPOVĚDOU -->
-    <div class="mt-4 mb-6 relative w-full max-w-2xl flex justify-center items-center">
-        <!-- Tlačítko Nápovědy -->
-        <button onclick="showHelp()" class="absolute right-0 top-0 mt-2 mr-2 bg-slate-800 hover:bg-sky-600 text-sky-400 hover:text-white rounded-full w-10 h-10 flex items-center justify-center transition-all shadow-lg border border-slate-600 z-10" title="Nápověda k rolím">
-            <i class="fa-solid fa-question text-xl"></i>
-        </button>
+@socketio.on('join_game')
+def handle_join(data):
+    name = data.get('name', '').strip()
+    if not name: 
+        emit('error_msg', 'Jméno nesmí být prázdné!', to=request.sid)
+        return
+    
+    if game_state["phase"] != "Lobby":
+        emit('error_msg', 'Hra už probíhá! Musíš počkat, až skončí.', to=request.sid)
+        return
 
-        <div class="text-center animate-bounce mt-4" style="animation-duration: 3s;">
-            <h1 class="text-5xl font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-rose-500 to-orange-400 drop-shadow-lg">
-                <i class="fa-solid fa-masks-theater text-rose-500 mr-2"></i>PALERMO
-            </h1>
-            <p class="text-rose-400 font-bold tracking-widest text-sm mt-1 uppercase opacity-80">Feign Edice</p>
-        </div>
-    </div>
+    existing_names = [p["name"].lower() for p in game_state["players"].values()]
+    if name.lower() in existing_names:
+        emit('error_msg', f'Jméno "{name}" už v lobby je. Zvol si jiné!', to=request.sid)
+        return
 
-    <!-- 1. PŘIHLAŠOVACÍ OBRAZOVKA -->
-    <div id="login-screen" class="w-full max-w-md glass-panel rounded-2xl p-8 shadow-2xl transition-all duration-500">
-        <h2 class="text-2xl font-bold text-center mb-6 text-slate-200">Vstup do města</h2>
-        <input type="text" id="player-name" placeholder="Tvoje přezdívka..." class="w-full bg-slate-900 border border-slate-600 rounded-xl px-5 py-4 text-lg text-white mb-4 focus:ring-2 focus:ring-rose-500 focus:border-transparent outline-none transition-all" maxlength="15">
-        <button onclick="joinGame()" class="w-full bg-gradient-to-r from-rose-600 to-rose-500 hover:from-rose-500 hover:to-rose-400 text-white font-bold py-4 rounded-xl shadow-lg transform transition hover:scale-[1.02] active:scale-95 text-lg">
-            <i class="fa-solid fa-right-to-bracket mr-2"></i> Připojit se
-        </button>
-    </div>
+    sid = request.sid
+    game_state["players"][sid] = {
+        "name": name,
+        "actual_role": "Měšťan",
+        "perceived_role": "Měšťan",
+        "alive": True
+    }
+    
+    if not game_state["host_sid"]:
+        game_state["host_sid"] = sid
+    
+    emit('join_success', {'name': name}, to=sid)
+    emit('host_status', {'is_host': (game_state["host_sid"] == sid)}, to=sid)
+    emit('update_players', get_player_info(), broadcast=True)
 
-    <!-- 2. LOBBY OBRAZOVKA -->
-    <div id="lobby-screen" class="w-full max-w-2xl hide">
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+@socketio.on('kick_player')
+def handle_kick(data):
+    if request.sid != game_state["host_sid"]: return 
+    
+    target_name = data.get('name')
+    target_sid = None
+    
+    for sid, p in game_state["players"].items():
+        if p["name"] == target_name:
+            target_sid = sid
+            break
             
-            <!-- Seznam hráčů -->
-            <div class="glass-panel rounded-2xl p-6 shadow-xl h-fit">
-                <h3 class="text-xl font-bold text-slate-200 mb-4 flex items-center justify-between">
-                    <span><i class="fa-solid fa-users text-sky-400 mr-2"></i>Hráči v Lobby</span>
-                    <span id="player-count" class="bg-slate-800 px-3 py-1 rounded-lg text-sm">0</span>
-                </h3>
-                <ul id="players-list" class="space-y-2"></ul>
-            </div>
+    if target_sid:
+        del game_state["players"][target_sid]
+        emit('kicked', {'msg': 'Byl jsi vyhozen z Lobby administrátorem.'}, to=target_sid)
+        emit('update_players', get_player_info(), broadcast=True)
 
-            <!-- Nastavení Hry (Vidí pouze Host) -->
-            <div id="host-controls" class="glass-panel rounded-2xl p-6 shadow-xl hide">
-                <h3 class="text-xl font-bold text-slate-200 mb-4"><i class="fa-solid fa-sliders text-amber-400 mr-2"></i>Nastavení rolí</h3>
-                <div class="grid grid-cols-2 gap-3 mb-6" id="roles-grid"></div>
+        if target_sid == game_state["host_sid"]:
+            alive_sids = list(game_state["players"].keys())
+            game_state["host_sid"] = alive_sids[0] if alive_sids else None
+            if game_state["host_sid"]:
+                emit('host_status', {'is_host': True}, to=game_state["host_sid"])
+
+@socketio.on('start_game')
+def handle_start(data):
+    if request.sid != game_state["host_sid"]: return
+    
+    game_state["phase"] = "Lobby"
+    game_state["votes"] = {}
+    game_state["night_actions"] = {}
+    
+    total_players = len(game_state["players"])
+    
+    settings = {
+        'mafia': data.get('mafia', '1'),
+        'pol': data.get('pol', '0'),
+        'track': data.get('track', '0'),
+        'trap': data.get('trap', '0'),
+        'doc': data.get('doc', '0'),
+        'det': data.get('det', '0'),
+        'jester': data.get('jester', '0'),
+        'insane': data.get('insane', '0'),
+        'mayor': data.get('mayor', '0')
+    }
+
+    max_limits = {
+        'mafia': max(1, total_players // 3),
+        'pol': 2,
+        'track': 2,
+        'trap': 2,
+        'doc': 2,
+        'det': max(1, total_players // 4),
+        'jester': 1,
+        'insane': 2,
+        'mayor': 1
+    }
+
+    assigned_counts = {}
+    random_roles = []
+    fixed_sum = 0
+
+    for role_key, val in settings.items():
+        if val == 'random':
+            assigned_counts[role_key] = 1
+            random_roles.append(role_key)
+            fixed_sum += 1
+        else:
+            c = int(val)
+            assigned_counts[role_key] = c
+            fixed_sum += c
+
+    if fixed_sum > total_players:
+        emit('error_msg', f'Pro toto nastavení potřebujete aspoň {fixed_sum} hráčů! Máte {total_players}.', to=request.sid)
+        return
+
+    available_for_random = total_players - fixed_sum
+    if available_for_random > 0 and random_roles:
+        max_possible_additions = sum(max_limits[r] - 1 for r in random_roles if max_limits[r] > 1)
+        if max_possible_additions > 0:
+            extra_to_add = random.randint(0, min(available_for_random, max_possible_additions))
+            for _ in range(extra_to_add):
+                valid_candidates = [r for r in random_roles if assigned_counts[r] < max_limits[r]]
+                if not valid_candidates: break
+                assigned_counts[random.choice(valid_candidates)] += 1
+
+    game_state["settings"]["mafia_consensus"] = data.get('mafia_consensus', False)
+    game_state["settings"]["public_voting"] = data.get('public_voting', False)
+    game_state["settings"]["reveal_roles"] = data.get('reveal_roles', True)
+
+    roles_to_assign = (
+        ["Mafián"] * assigned_counts['mafia'] + 
+        ["Policista"] * assigned_counts['pol'] + 
+        ["Stopař"] * assigned_counts['track'] + 
+        ["Pastičkář"] * assigned_counts['trap'] +
+        ["Doktor"] * assigned_counts['doc'] + 
+        ["Detektiv"] * assigned_counts['det'] + 
+        ["Šašek"] * assigned_counts['jester'] + 
+        ["Blázen"] * assigned_counts['insane'] + 
+        ["Starosta"] * assigned_counts['mayor']
+    )
+    
+    while len(roles_to_assign) < total_players:
+        roles_to_assign.append("Měšťan")
+        
+    random.shuffle(roles_to_assign)
+    p_ids = list(game_state["players"].keys())
+    
+    for idx, sid in enumerate(p_ids):
+        r = roles_to_assign[idx]
+        p = game_state["players"][sid]
+        p["actual_role"] = r
+        p["alive"] = True
+        p["perceived_role"] = random.choice(["Policista", "Stopař", "Pastičkář", "Doktor", "Detektiv"]) if r == "Blázen" else r
+
+    start_night()
+
+def start_night():
+    game_state["phase"] = "Noc"
+    game_state["night_actions"] = {}
+    
+    alive_players = [p["name"] for p in game_state["players"].values() if p["alive"]]
+    mafia_names = [p["name"] for p in game_state["players"].values() if p["actual_role"] == "Mafián" and p["alive"]]
+    all_roles_payload = [{"name": p["name"], "role": p["actual_role"], "alive": p["alive"]} for p in game_state["players"].values()]
+    
+    for sid, player in game_state["players"].items():
+        payload = {
+            "role": player["perceived_role"],
+            "phase": game_state["phase"],
+            "alive": player["alive"],
+            "alive_players": alive_players,
+            "mafia_mates": mafia_names if player["actual_role"] == "Mafián" else []
+        }
+        if not player["alive"]: payload["all_roles"] = all_roles_payload
+        emit('game_started', payload, to=sid)
+
+@socketio.on('proceed_to_night')
+def handle_proceed_to_night():
+    if game_state["phase"] != "Lobby" and request.sid == game_state["host_sid"]:
+        start_night()
+
+@socketio.on('night_action')
+def handle_night_action(data):
+    if game_state["phase"] != "Noc": return
+    sid = request.sid
+    if sid not in game_state["players"] or not game_state["players"][sid]["alive"]: return
+    
+    game_state["night_actions"][sid] = data.get('target')
+    emit('action_confirmed', {'msg': 'Akce odeslána. Čeká se na ostatní...'}, to=sid)
+    check_night_end()
+
+def check_night_end():
+    alive_sids = [s for s, p in game_state["players"].items() if p["alive"]]
+    if len(game_state["night_actions"]) < len(alive_sids): return
+    
+    actions = {}
+    for sid, target in game_state["night_actions"].items():
+        player = game_state["players"][sid]
+        actions[sid] = {
+            "name": player["name"], "role": player["actual_role"], "perc_role": player["perceived_role"],
+            "target": target, "blocked": False, "trapped": False
+        }
+
+    name_to_sid = {p["name"]: s for s, p in game_state["players"].items()}
+    personal_msgs = {s: [] for s in alive_sids}
+    
+    def add_msg(target_sid, msg_type, icon, title, text):
+        if target_sid in personal_msgs:
+            personal_msgs[target_sid].append({'type': msg_type, 'icon': icon, 'title': title, 'text': text})
+
+    for sid, act in actions.items():
+        if act["role"] == "Policista" and act["target"]:
+            tgt_sid = name_to_sid.get(act["target"])
+            if tgt_sid in actions:
+                tgt_act = actions[tgt_sid]
+                tried_to_leave = bool(tgt_act["target"]) and tgt_act["role"] not in ["Měšťan", "Šašek"]
+                if tried_to_leave:
+                    tgt_act["blocked"] = True
+                    add_msg(tgt_sid, 'danger', 'fa-handcuffs', 'Zásah policie!', 'Zastavila tě policie! Tvá noční akce byla zrušena a zůstal jsi doma.')
+                    add_msg(sid, 'success', 'fa-user-lock', 'Úspěšný zásah!', f'Úspěšně jsi zablokoval hráče <b>{act["target"]}</b>, který se zrovna chystal odejít z domu!')
+                else:
+                    add_msg(sid, 'info', 'fa-user-shield', 'Klidná hlídka', f'Hlídal jsi hráče <b>{act["target"]}</b>, ale ten celou noc nevyšel z domu.')
+
+    for sid, act in actions.items():
+        if act["role"] == "Stopař" and not act["blocked"] and act["target"]:
+            tgt_sid = name_to_sid.get(act["target"])
+            visited_target = None
+            if tgt_sid in actions and not actions[tgt_sid]["blocked"] and actions[tgt_sid]["role"] not in ["Měšťan", "Šašek"]:
+                visited_target = actions[tgt_sid]["target"]
+            if visited_target: add_msg(sid, 'success', 'fa-shoe-prints', 'Stopy nalezeny!', f'Hráč <b>{act["target"]}</b> navštívil hráče: <b>{visited_target}</b>.')
+            else: add_msg(sid, 'info', 'fa-shoe-prints', 'Čistá stopa', f'Hráč <b>{act["target"]}</b> zůstal celou noc doma.')
+
+    traps = {} 
+    for sid, act in actions.items():
+        if act["role"] == "Pastičkář" and not act["blocked"] and act["target"]:
+            traps.setdefault(act["target"], []).append(sid)
+
+    visitors = [(v_sid, v_act) for v_sid, v_act in actions.items() if v_act["role"] in ["Mafián", "Doktor", "Detektiv"] and not v_act["blocked"] and v_act["target"] in traps]
+    random.shuffle(visitors)
+
+    traps_triggered = {t: [] for t in traps}
+    active_traps = {t: len(traps[t]) for t in traps} 
+    
+    for v_sid, v_act in visitors:
+        tgt = v_act["target"]
+        if active_traps[tgt] > 0:
+            v_act["trapped"] = True
+            active_traps[tgt] -= 1
+            traps_triggered[tgt].append(v_act["name"])
+            add_msg(v_sid, 'danger', 'fa-spider', 'Past!', 'Šlápl jsi do pasti! Tvá akce byla přerušena.')
+
+    for tgt_house, t_sids in traps.items():
+        caught_names = traps_triggered[tgt_house]
+        for i, t_sid in enumerate(t_sids):
+            if i < len(caught_names): add_msg(t_sid, 'success', 'fa-spider', 'Past sklapla!', f'V pasti u hráče <b>{tgt_house}</b> uvízl: <b>{caught_names[i]}</b>')
+            else: add_msg(t_sid, 'info', 'fa-spider', 'Klidná past', f'Do tvé pasti u hráče <b>{tgt_house}</b> nikdo nešlápl.')
+
+    dead_names, healed_names, mafia_votes = set(), set(), []
+    for sid, act in actions.items():
+        if act["blocked"] or act["trapped"] or not act["target"]: continue
+        if act["role"] == "Doktor": healed_names.add(act["target"])
+        elif act["role"] == "Detektiv":
+            tgt_real = next(p["actual_role"] for p in game_state["players"].values() if p["name"] == act["target"])
+            shown = [tgt_real, random.choice([r for r in ALL_ROLES if r != tgt_real])]
+            random.shuffle(shown)
+            add_msg(sid, 'success', 'fa-magnifying-glass', 'Stopy', f'<b>{act["target"]}</b> je <b>{shown[0]}</b> NEBO <b>{shown[1]}</b>!')
+        elif act["role"] == "Mafián": mafia_votes.append(act["target"])
+
+    if mafia_votes:
+        if game_state["settings"]["mafia_consensus"]:
+            if len(set(mafia_votes)) == 1: 
+                dead_names.add(mafia_votes[0])
+                for sid in [s for s, a in actions.items() if a["role"] == "Mafián" and not a["blocked"] and not a["trapped"]]:
+                    add_msg(sid, 'info', 'fa-user-secret', 'Útok mafie', f'Úspěšně jste zaútočili na <b>{mafia_votes[0]}</b>.')
+            else:
+                for sid in [s for s, a in actions.items() if a["role"] == "Mafián"]:
+                    add_msg(sid, 'warning', 'fa-triangle-exclamation', 'Neshoda!', 'Neshodli jste se, útok zrušen.')
+        else:
+            target = max(set(mafia_votes), key=mafia_votes.count)
+            dead_names.add(target)
+            for sid in [s for s, a in actions.items() if a["role"] == "Mafián" and not a["blocked"] and not a["trapped"]]:
+                add_msg(sid, 'info', 'fa-user-secret', 'Útok mafie', f'Zaútočili jste na <b>{target}</b>.')
+
+    actual_deaths = []
+    for n in dead_names:
+        if n in healed_names:
+            for sid, act in actions.items():
+                if act["role"] == "Doktor" and act["target"] == n and not act["blocked"] and not act["trapped"]:
+                    add_msg(sid, 'success', 'fa-heart-pulse', 'Život zachráněn!', f'Tvůj včasný zásah zachránil <b>{n}</b> před mafií!')
+        else: actual_deaths.append(n)
+
+    for sid, act in actions.items():
+        if act["role"] == "Doktor" and act["target"] and act["target"] not in dead_names and not act["blocked"] and not act["trapped"]:
+            add_msg(sid, 'info', 'fa-syringe', 'Léčení', f'Hlídal jsi hráče <b>{act["target"]}</b>.')
+
+    for sid, act in actions.items():
+        if act["role"] == "Blázen" and act["target"] and not act["blocked"]:
+            pr = act["perc_role"]
+            if pr == "Detektiv":
+                shown = random.sample(ALL_ROLES, 2)
+                add_msg(sid, 'success', 'fa-magnifying-glass', 'Stopy', f'<b>{act["target"]}</b> je <b>{shown[0]}</b> NEBO <b>{shown[1]}</b>!')
+            elif pr == "Stopař":
+                if random.choice([True, False]): add_msg(sid, 'success', 'fa-shoe-prints', 'Stopy!', f'<b>{act["target"]}</b> navštívil: <b>{random.choice(alive_sids)}</b>.')
+                else: add_msg(sid, 'info', 'fa-shoe-prints', 'Čistá stopa', f'<b>{act["target"]}</b> zůstal doma.')
+            elif pr == "Pastičkář":
+                if random.choice([True, False]): add_msg(sid, 'success', 'fa-spider', 'Past sklapla!', f'Někdo se v noci chytil do tvé pasti! Byl to: <b>{random.choice(alive_sids)}</b>')
+                else: add_msg(sid, 'info', 'fa-spider', 'Klidná past', f'Do tvé pasti u hráče <b>{act["target"]}</b> nikdo nešlápl.')
+            elif pr == "Policista":
+                if random.choice([True, False]): add_msg(sid, 'success', 'fa-user-lock', 'Úspěšný zásah!', f'Úspěšně jsi zablokoval hráče <b>{act["target"]}</b>!')
+                else: add_msg(sid, 'info', 'fa-user-shield', 'Klidná hlídka', f'Hlídal jsi hráče <b>{act["target"]}</b>, ale nikam nešel.')
+            elif pr == "Doktor":
+                if random.random() < 0.2: add_msg(sid, 'success', 'fa-heart-pulse', 'Život zachráněn!', f'Tvůj včasný zásah zachránil <b>{act["target"]}</b>!')
+                else: add_msg(sid, 'info', 'fa-syringe', 'Léčení', f'Hlídal jsi hráče <b>{act["target"]}</b>.')
+
+    for sid, act in actions.items():
+        if not act["target"] and not act["blocked"] and act["role"] in ["Měšťan", "Šašek"]:
+            add_msg(sid, 'info', 'fa-bed', 'Poklidný spánek', 'Spal jsi ve své posteli.')
+
+    for p in game_state["players"].values():
+        if p["name"] in actual_deaths: p["alive"] = False
+
+    if check_win_condition(is_night=True): return 
+
+    dead_msg_list = []
+    for name in actual_deaths:
+        p = next(p for p in game_state["players"].values() if p["name"] == name)
+        r_str = f" <span class='text-slate-400 font-normal italic'>(Byl to: {p['actual_role']})</span>" if game_state["settings"]["reveal_roles"] else ""
+        dead_msg_list.append(f"<div class='text-xl font-bold text-white'>{name}{r_str}</div>")
+
+    msg_str = f"{''.join(dead_msg_list)}" if dead_msg_list else "Klidná noc. Dnes nikdo nezemřel."
+    
+    game_state["phase"] = "Den"
+    all_roles_payload = [{"name": p["name"], "role": p["actual_role"], "alive": p["alive"]} for p in game_state["players"].values()]
+    
+    for sid, p in game_state["players"].items():
+        payload = {'msg': msg_str, 'dead': len(actual_deaths) > 0, 'personal_msgs': personal_msgs.get(sid, []), 'is_alive': p["alive"]}
+        if not p["alive"]: payload["all_roles"] = all_roles_payload
+        emit('day_phase', payload, to=sid)
+
+@socketio.on('start_voting')
+def handle_start_voting():
+    if game_state["phase"] != "Den": return
+    game_state["phase"] = "Hlasování"
+    game_state["votes"] = {}
+    
+    alive_players = [p["name"] for p in game_state["players"].values() if p["alive"]]
+    all_roles_payload = [{"name": p["name"], "role": p["actual_role"], "alive": p["alive"]} for p in game_state["players"].values()]
+    
+    for sid, p in game_state["players"].items():
+        payload = {'candidates': alive_players}
+        if not p["alive"]: payload["all_roles"] = all_roles_payload
+        emit('voting_started', payload, to=sid)
+
+@socketio.on('submit_vote')
+def handle_submit_vote(data):
+    if game_state["phase"] != "Hlasování": return
+    sid = request.sid
+    if sid not in game_state["players"] or not game_state["players"][sid]["alive"]: return
+    
+    game_state["votes"][sid] = data.get('target')
+    alive_sids = [s for s, p in game_state["players"].items() if p["alive"]]
+    
+    if len(game_state["votes"]) >= len(alive_sids): evaluate_votes()
+
+def evaluate_votes():
+    vote_points, vote_details = {}, {}
+    
+    for sid, target in game_state["votes"].items():
+        voter_name = game_state["players"][sid]["name"]
+        is_mayor = game_state["players"][sid]["actual_role"] == "Starosta"
+        points = 2 if is_mayor else 1
+        
+        vote_points[target] = vote_points.get(target, 0) + points
+        vote_details.setdefault(target, []).append(f"{voter_name} (x2)" if is_mayor else voter_name)
+
+    eliminated = max(vote_points, key=vote_points.get)
+    res_str = f"<div class='text-2xl font-black text-white mb-2'>Oběšen byl(a): <span class='text-red-500'>{eliminated}</span></div>"
+    
+    if game_state["settings"]["reveal_roles"]:
+        p = next(p for p in game_state["players"].values() if p["name"] == eliminated)
+        res_str += f"<div class='text-amber-400 font-bold mb-4'>Ukázalo se, že to byl(a): {p['actual_role']}!</div>"
                 
-                <div class="space-y-3 mb-6 bg-slate-800/50 p-4 rounded-xl border border-slate-700">
-                    <label class="flex items-center space-x-3 cursor-pointer">
-                        <input type="checkbox" id="set-consensus" class="w-5 h-5 accent-rose-500 rounded">
-                        <span class="text-sm font-medium text-slate-300">Jednomyslná shoda Mafie</span>
-                    </label>
-                    <label class="flex items-center space-x-3 cursor-pointer">
-                        <input type="checkbox" id="set-reveal" class="w-5 h-5 accent-rose-500 rounded" checked>
-                        <span class="text-sm font-medium text-slate-300">Odhalit pravou roli po smrti</span>
-                    </label>
-                    <label class="flex items-center space-x-3 cursor-pointer">
-                        <input type="checkbox" id="set-public" class="w-5 h-5 accent-rose-500 rounded" checked>
-                        <span class="text-sm font-medium text-slate-300">Veřejné hlasování u soudu</span>
-                    </label>
-                </div>
+    res_str += "<div class='space-y-2 mt-4 bg-slate-800/50 p-4 rounded-xl'>"
+    for tgt, pts in sorted(vote_points.items(), key=lambda x: x[1], reverse=True):
+        if game_state["settings"]["public_voting"]: 
+            res_str += f"<div class='text-slate-300 flex justify-between'><span class='font-bold text-white'>{tgt} ({pts} hl.)</span> <span class='text-sm italic text-slate-400'>{', '.join(vote_details[tgt])}</span></div>"
+        else: 
+            res_str += f"<div class='text-slate-300'><span class='font-bold text-white'>{tgt}:</span> {pts} hlasů</div>"
+    res_str += "</div>"
 
-                <button onclick="startGame()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-4 rounded-xl shadow-lg shadow-emerald-900/50 transform transition hover:scale-[1.02] active:scale-95 text-lg">
-                    <i class="fa-solid fa-play mr-2"></i> Odstartovat hru
-                </button>
-            </div>
-            
-            <div id="waiting-msg" class="glass-panel rounded-2xl p-6 shadow-xl flex flex-col items-center justify-center text-center h-full text-slate-400">
-                <i class="fa-solid fa-hourglass-half text-4xl mb-4 animate-pulse"></i>
-                <p>Čeká se, až hostitel (Administrátor) nastaví role a odstartuje hru...</p>
-            </div>
-        </div>
-    </div>
+    for p in game_state["players"].values():
+        if p["name"] == eliminated:
+            p["alive"] = False
+            if p["actual_role"] == "Šašek":
+                final_msg = res_str + "<br><div class='text-amber-500 text-3xl font-black mt-6 animate-pulse text-center'>🤡 ŠAŠEK BYL UPÁLEN A VYHRÁVÁ HRU! 🤡</div>"
+                emit('game_over', {'winner': 'Šašek', 'msg': final_msg}, broadcast=True)
+                game_state["phase"] = "Lobby"
+                return
 
-    <!-- 3. HERNÍ OBRAZOVKA -->
-    <div id="game-screen" class="w-full max-w-2xl hide">
-        <div class="glass-panel rounded-2xl p-6 shadow-xl mb-6 text-center relative overflow-hidden border-t-4 border-rose-500">
-            <h2 id="phase-title" class="text-3xl font-black text-white tracking-widest mb-2 uppercase">FÁZE</h2>
-            <div class="text-slate-400 mb-4">Tvoje role pro tuto hru:</div>
-            <div id="my-role" class="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-500 drop-shadow-md">Neznámá</div>
-            <div id="mafia-mates" class="mt-4 text-sm text-rose-400 font-bold hide"></div>
-        </div>
-        <div id="dynamic-game-content" class="glass-panel rounded-2xl p-6 shadow-xl"></div>
-    </div>
+    check_win_condition(is_night=False, custom_msg=res_str)
 
-    <script>
-        const socket = io();
-        let myName = "";
-        let isHost = false;
+def check_win_condition(is_night=False, custom_msg=""):
+    alive_mafia = sum(1 for p in game_state["players"].values() if p["actual_role"] == "Mafián" and p["alive"])
+    alive_town = sum(1 for p in game_state["players"].values() if p["actual_role"] != "Mafián" and p["alive"])
+    
+    if alive_mafia == 0:
+        emit('game_over', {'winner': 'Měšťané', 'msg': custom_msg or "Všichni zloduchové jsou mrtví!"}, broadcast=True)
+        game_state["phase"] = "Lobby"
+        return True
+    elif alive_mafia >= alive_town:
+        emit('game_over', {'winner': 'Mafie', 'msg': custom_msg or "Mafie přečíslila město a ovládla ho!"}, broadcast=True)
+        game_state["phase"] = "Lobby"
+        return True
+        
+    if not is_night: emit('trial_results', {'msg': custom_msg}, broadcast=True)
+    return False
 
-        // --- NÁPOVĚDA A PRAVIDLA ---
-        function showHelp() {
-            Swal.fire({
-                title: '<span class="text-2xl font-black text-white"><i class="fa-solid fa-book-open text-sky-400 mr-2"></i> Pravidla a Nápověda</span>',
-                html: `
-                    <div class="text-left space-y-4 text-sm text-slate-300 max-h-[65vh] overflow-y-auto pr-2 custom-scrollbar">
-                        
-                        <h3 class="text-lg font-bold text-white border-b border-slate-600 pb-1"><i class="fa-solid fa-scroll mr-2"></i>Jak hrát</h3>
-                        <p class="mb-2">Hra se dělí na dvě hlavní fáze:</p>
-                        <ul class="list-disc pl-5 space-y-1 mb-4">
-                            <li><b>Noc:</b> Hráči se speciálními rolemi tajně vykonávají své akce (kliknutím na dům hráče). Ostatní spí.</li>
-                            <li><b>Den:</b> Ráno se dozvíte události noci. Město volně diskutuje o tom, kdo lže, a snaží se odhalit Mafiány. Závěrem dne je <b>Soud</b>, kde se hlasuje, koho město popraví.</li>
-                        </ul>
-                        <p class="mb-4">Cílem <b>Města</b> je odhalit a popravit všechny Mafiány. Cílem <b>Mafie</b> je přežít a přečíslit Město.</p>
+def get_player_info():
+    return [{"name": p["name"], "is_host": (sid == game_state["host_sid"])} for sid, p in game_state["players"].items()]
 
-                        <h3 class="text-lg font-bold text-white border-b border-slate-600 pb-1 mt-4"><i class="fa-solid fa-users mr-2"></i>Role ve hře</h3>
-                        
-                        <div class="space-y-3">
-                            <div>
-                                <h4 class="font-bold text-slate-300 mb-1 text-base"><i class="fa-solid fa-user w-5"></i> Měšťan</h4>
-                                Nemá žádnou noční akci. Přes den musí bedlivě poslouchat, všímat si chyb a pokusit se odhalit lháře.
-                            </div>
-                            <div class="border-t border-slate-700 pt-3">
-                                <h4 class="font-bold text-rose-500 mb-1 text-base"><i class="fa-solid fa-user-secret w-5"></i> Mafián</h4>
-                                V noci vybírá cíl k zabití. (Při zapnuté "Shodě mafie" se musí všichni mafiáni domluvit a kliknout na stejný dům, jinak útok selže).
-                            </div>
-                            <div class="border-t border-slate-700 pt-3">
-                                <h4 class="font-bold text-blue-400 mb-1 text-base"><i class="fa-solid fa-user-shield w-5"></i> Policista</h4>
-                                V noci hlídá vybraného hráče. Pokud se jeho cíl zrovna chystal odejít z domu (udělat noční akci), policie ho zastaví a jeho akce se zruší.
-                            </div>
-                            <div class="border-t border-slate-700 pt-3">
-                                <h4 class="font-bold text-emerald-400 mb-1 text-base"><i class="fa-solid fa-shoe-prints w-5"></i> Stopař</h4>
-                                Zjistí, ke komu vybraný hráč v noci šel. Pokud cíl nikam nešel (nebo nemá akci), najde Stopař jen prázdnou stopu.
-                            </div>
-                            <div class="border-t border-slate-700 pt-3">
-                                <h4 class="font-bold text-amber-500 mb-1 text-base"><i class="fa-solid fa-spider w-5"></i> Pastičkář</h4>
-                                Nastraží k někomu past. První člověk s aktivní rolí (Mafián, Doktor, Detektiv...), který do tohoto domu v noci přijde, do ní šlápne, s křikem uteče a nic nevykoná. Pastičkář se navíc dozví jeho jméno.
-                            </div>
-                            <div class="border-t border-slate-700 pt-3">
-                                <h4 class="font-bold text-cyan-400 mb-1 text-base"><i class="fa-solid fa-magnifying-glass w-5"></i> Detektiv</h4>
-                                Vyšetřuje vybraného hráče. Ráno dostane od serveru 2 možné role – jedna z nich je stoprocentně ta pravá.
-                            </div>
-                            <div class="border-t border-slate-700 pt-3">
-                                <h4 class="font-bold text-green-400 mb-1 text-base"><i class="fa-solid fa-user-doctor w-5"></i> Doktor</h4>
-                                Hlídá u někoho doma (může i u sebe). Pokud se tento cíl pokusí Mafie v noci zabít, Doktor mu zachrání život.
-                            </div>
-                            <div class="border-t border-slate-700 pt-3">
-                                <h4 class="font-bold text-yellow-300 mb-1 text-base"><i class="fa-solid fa-scale-balanced w-5"></i> Starosta</h4>
-                                Nemá noční akci, ale u denního soudu se jeho hlas automaticky počítá jako dva hlasy.
-                            </div>
-                            <div class="border-t border-slate-700 pt-3">
-                                <h4 class="font-bold text-fuchsia-400 mb-1 text-base"><i class="fa-solid fa-mask-face w-5"></i> Šašek</h4>
-                                Chce jediné - být přes den upálen/oběšen! Pokud u soudu přesvědčí ostatní, aby pro něj hlasovali, okamžitě sám vyhrává celou hru.
-                            </div>
-                            <div class="border-t border-slate-700 pt-3">
-                                <h4 class="font-bold text-purple-400 mb-1 text-base"><i class="fa-solid fa-face-dizzy w-5"></i> Blázen (Volitelně)</h4>
-                                Neví, že je blázen. Na obrazovce vidí jinou roli (např. Policista). V noci normálně provádí akce, ale ráno dostává od serveru naprosto smyšlené výsledky. Slouží k absolutnímu zmatení města.
-                            </div>
-                        </div>
-                    </div>
-                `,
-                background: '#1e293b',
-                color: '#fff',
-                confirmButtonColor: '#0ea5e9', // Sky-500
-                confirmButtonText: '<i class="fa-solid fa-check mr-2"></i> Rozumím',
-                customClass: { popup: 'rounded-2xl border border-slate-700' },
-                width: '600px'
-            });
-        }
-
-        // --- KONFIGURACE ROLÍ PRO UI ---
-        const rolesConfig = [
-            { id: 'mafia', name: 'Mafiáni', color: 'text-rose-500', default: '1' },
-            { id: 'pol', name: 'Policista', color: 'text-blue-400', default: '0' },
-            { id: 'track', name: 'Stopař', color: 'text-emerald-400', default: '0' },
-            { id: 'trap', name: 'Pastičkář', color: 'text-amber-500', default: '0' },
-            { id: 'det', name: 'Detektiv', color: 'text-cyan-400', default: '0' },
-            { id: 'doc', name: 'Doktor', color: 'text-green-400', default: '0' },
-            { id: 'jester', name: 'Šašek', color: 'text-fuchsia-400', default: '0' },
-            { id: 'mayor', name: 'Starosta', color: 'text-yellow-300', default: '0' }
-        ];
-
-        const rolesGrid = document.getElementById('roles-grid');
-        rolesConfig.forEach(r => {
-            rolesGrid.innerHTML += `
-                <div class="bg-slate-800/80 p-2 rounded-xl border border-slate-700/50 flex flex-col items-center">
-                    <span class="text-xs font-bold uppercase tracking-wider mb-1 ${r.color}">${r.name}</span>
-                    <select id="role-${r.id}" class="role-input">
-                        <option value="0" ${r.default==='0'?'selected':''}>0</option>
-                        <option value="1" ${r.default==='1'?'selected':''}>1</option>
-                        <option value="2" ${r.default==='2'?'selected':''}>2</option>
-                        <option value="3" ${r.default==='3'?'selected':''}>3</option>
-                        <option value="random">Náhodně</option>
-                    </select>
-                </div>`;
-        });
-        rolesGrid.innerHTML += `
-            <div class="col-span-2 bg-purple-900/20 p-2 rounded-xl border border-purple-500/30 flex flex-col items-center">
-                <span class="text-xs font-bold uppercase tracking-wider mb-1 text-purple-400"><i class="fa-solid fa-mask mr-1"></i> Blázen (Fake role)</span>
-                <select id="role-insane" class="role-input !bg-purple-900/40">
-                    <option value="0" selected>Vypnuto (0)</option>
-                    <option value="1">1</option>
-                    <option value="2">2</option>
-                </select>
-            </div>`;
-
-        // --- PŘIPOJENÍ ---
-        function joinGame() {
-            const input = document.getElementById('player-name').value;
-            if (input.trim() === "") {
-                Swal.fire({ icon: 'error', title: 'Chyba', text: 'Zadej prosím nějakou přezdívku!', background: '#1e293b', color: '#fff' });
-                return;
-            }
-            socket.emit('join_game', {name: input});
-        }
-
-        socket.on('error_msg', function(msg) {
-            Swal.fire({ icon: 'error', title: 'Nelze se připojit', text: msg, background: '#1e293b', color: '#fff', confirmButtonColor: '#e11d48' });
-        });
-
-        socket.on('join_success', function(data) {
-            myName = data.name;
-            document.getElementById('login-screen').classList.add('hide');
-            document.getElementById('lobby-screen').classList.remove('hide');
-        });
-
-        socket.on('host_status', function(data) {
-            isHost = data.is_host;
-            if(isHost) {
-                document.getElementById('host-controls').classList.remove('hide');
-                document.getElementById('waiting-msg').classList.add('hide');
-            } else {
-                document.getElementById('host-controls').classList.add('hide');
-                document.getElementById('waiting-msg').classList.remove('hide');
-            }
-        });
-
-        socket.on('update_players', function(playersInfo) {
-            const list = document.getElementById('players-list');
-            list.innerHTML = '';
-            document.getElementById('player-count').innerText = playersInfo.length;
-            
-            playersInfo.forEach(p => {
-                const isMe = p.name === myName;
-                const hostBadge = p.is_host ? `<i class="fa-solid fa-crown text-amber-400 ml-2 text-sm" title="Hostitel"></i>` : '';
-                const meBadge = isMe ? `<span class="ml-2 text-xs bg-slate-700 px-2 py-0.5 rounded-full text-slate-300">Ty</span>` : '';
-                const kickBtn = (isHost && !isMe) ? `<button onclick="kickPlayer('${p.name}')" class="text-rose-500 hover:text-rose-400 transition ml-auto" title="Vyhodit hráče"><i class="fa-solid fa-circle-xmark text-lg"></i></button>` : '';
-
-                list.innerHTML += `
-                    <li class="flex items-center bg-slate-800/60 p-3 rounded-xl border border-slate-700/50">
-                        <div class="w-8 h-8 rounded-full bg-gradient-to-br ${p.is_host ? 'from-amber-400 to-orange-600' : 'from-slate-600 to-slate-800'} flex items-center justify-center mr-3 shadow-inner">
-                            <i class="fa-solid fa-user text-white text-xs"></i>
-                        </div>
-                        <span class="font-bold text-slate-200 text-lg">${p.name}</span>
-                        ${hostBadge} ${meBadge} ${kickBtn}
-                    </li>`;
-            });
-        });
-
-        function kickPlayer(name) {
-            Swal.fire({
-                title: 'Opravdu vyhodit?',
-                text: `Hráč ${name} bude okamžitě vyhozen z Lobby.`,
-                icon: 'warning',
-                showCancelButton: true,
-                confirmButtonColor: '#e11d48',
-                cancelButtonColor: '#475569',
-                confirmButtonText: 'Ano, vyhodit!',
-                cancelButtonText: 'Zrušit',
-                background: '#1e293b', color: '#fff'
-            }).then((result) => {
-                if (result.isConfirmed) { socket.emit('kick_player', {name: name}); }
-            });
-        }
-
-        socket.on('kicked', function(data) {
-            Swal.fire({
-                title: 'Vyhozen!', text: data.msg, icon: 'error',
-                background: '#1e293b', color: '#fff', confirmButtonColor: '#3b82f6',
-                allowOutsideClick: false
-            }).then(() => { window.location.reload(); });
-        });
-
-        function startGame() {
-            const data = {
-                mafia_consensus: document.getElementById('set-consensus').checked,
-                reveal_roles: document.getElementById('set-reveal').checked,
-                public_voting: document.getElementById('set-public').checked,
-                insane: document.getElementById('role-insane').value
-            };
-            rolesConfig.forEach(r => { data[r.id] = document.getElementById('role-'+r.id).value; });
-            socket.emit('start_game', data);
-        }
-
-        // --- HERNÍ LOGIKA UI ---
-        socket.on('game_started', function(data) {
-            document.getElementById('lobby-screen').classList.add('hide');
-            document.getElementById('game-screen').classList.remove('hide');
-            
-            document.getElementById('phase-title').innerText = "Fáze: " + data.phase;
-            document.getElementById('phase-title').className = "text-3xl font-black tracking-widest mb-2 uppercase " + (data.phase === "Noc" ? "text-indigo-400" : "text-amber-400");
-            
-            const roleEl = document.getElementById('my-role');
-            roleEl.innerText = data.role;
-            if(data.role === "Mafián") roleEl.className = "text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-rose-500 to-red-600 drop-shadow-md animate-pulse";
-            else roleEl.className = "text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-500 drop-shadow-md";
-
-            const matesEl = document.getElementById('mafia-mates');
-            if(data.mafia_mates.length > 0) {
-                matesEl.innerHTML = `<i class="fa-solid fa-users"></i> Spoluhráči mafie: ${data.mafia_mates.join(', ')}`;
-                matesEl.classList.remove('hide');
-            } else { matesEl.classList.add('hide'); }
-
-            const content = document.getElementById('dynamic-game-content');
-            if (!data.alive) {
-                content.innerHTML = `<div class="text-center"><i class="fa-solid fa-ghost text-6xl text-slate-500 mb-4 animate-bounce"></i><h3 class="text-2xl font-bold text-slate-400">Jsi po smrti.</h3><p class="text-slate-500 mt-2">Můžeš pouze sledovat hru.</p></div>`;
-                return;
-            }
-
-            if (data.phase === "Noc") {
-                let html = `<h3 class="text-xl font-bold text-slate-200 mb-6 text-center"><i class="fa-solid fa-moon text-indigo-400 mr-2"></i>Vyber dům, který v noci navštívíš:</h3>`;
-                
-                // VIZUÁLNÍ BARÁČKY (Grid mřížka domů)
-                html += `<div class="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-6">`;
-                data.alive_players.forEach(p => {
-                    if (p !== myName || data.role === "Doktor" || data.role === "Pastičkář") {
-                        html += `
-                        <div onclick="sendNightAction('${p}')" class="cursor-pointer bg-slate-800 hover:bg-indigo-700 border border-slate-700 hover:border-indigo-400 rounded-2xl p-4 flex flex-col items-center justify-center transition-all shadow-lg transform hover:-translate-y-1 group">
-                            <div class="relative mb-2 mt-1">
-                                <i class="fa-solid fa-house-chimney text-4xl text-slate-500 group-hover:text-indigo-200 transition-colors"></i>
-                                <!-- Efekt rozsvíceného okénka při najetí myší -->
-                                <div class="absolute -bottom-1 -right-1 w-3 h-3 bg-yellow-400 rounded-sm opacity-0 group-hover:opacity-100 transition-opacity shadow-[0_0_10px_rgba(250,204,21,0.8)]"></div>
-                            </div>
-                            <span class="font-bold text-slate-300 group-hover:text-white text-center break-words w-full text-sm">${p}</span>
-                        </div>`;
-                    }
-                });
-                html += `</div>`;
-
-                // Volba nic nedělání dole
-                if (data.role === "Měšťan" || data.role === "Šašek" || data.role === "Starosta") {
-                    html += `<button onclick="sendNightAction('')" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-4 rounded-xl shadow-lg mt-2"><i class="fa-solid fa-bed mr-2"></i> Jít spát (Nemáš noční akci)</button>`;
-                } else {
-                    html += `<button onclick="sendNightAction('')" class="w-full bg-slate-700 hover:bg-slate-600 text-slate-300 font-bold py-4 rounded-xl shadow-lg mt-2"><i class="fa-solid fa-house-user mr-2"></i> Zůstat doma (Nechodit ven)</button>`;
-                }
-                content.innerHTML = html;
-            }
-        });
-
-        function sendNightAction(target) {
-            socket.emit('night_action', {target: target});
-            document.getElementById('dynamic-game-content').innerHTML = `
-                <div class="flex flex-col items-center justify-center py-8">
-                    <div class="w-16 h-16 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-                    <p class="text-lg font-bold text-indigo-300">Akce odeslána!</p>
-                    <p class="text-slate-400 text-sm mt-2">Čeká se na ostatní hráče...</p>
-                </div>`;
-        }
-
-        socket.on('day_phase', function(data) {
-            document.getElementById('phase-title').innerText = "Fáze: Den";
-            document.getElementById('phase-title').className = "text-3xl font-black tracking-widest mb-2 uppercase text-amber-400";
-            
-            const content = document.getElementById('dynamic-game-content');
-            let html = ``;
-
-            if (data.personal_msgs && data.personal_msgs.length > 0) {
-                html += `<div class="mb-6 space-y-3">`;
-                data.personal_msgs.forEach(msg => {
-                    let color = msg.type === 'success' ? 'emerald' : msg.type === 'danger' ? 'rose' : msg.type === 'warning' ? 'amber' : 'sky';
-                    html += `
-                        <div class="bg-${color}-900/30 border-l-4 border-${color}-500 p-4 rounded-r-xl">
-                            <div class="flex items-center text-${color}-400 font-bold mb-1"><i class="fa-solid ${msg.icon} mr-2"></i> ${msg.title}</div>
-                            <div class="text-slate-300 text-sm">${msg.text}</div>
-                        </div>`;
-                });
-                html += `</div>`;
-            }
-
-            html += `
-                <div class="text-center p-6 bg-slate-900 rounded-xl border border-slate-700 shadow-inner mb-6">
-                    <h3 class="text-xl font-bold mb-3 ${data.dead ? 'text-rose-500' : 'text-emerald-400'}">
-                        <i class="fa-solid ${data.dead ? 'fa-skull' : 'fa-sun'} mr-2"></i>Události minulé noci
-                    </h3>
-                    <div>${data.msg}</div>
-                </div>`;
-
-            if (data.is_alive && isHost) {
-                html += `<button onclick="startVoting()" class="w-full bg-gradient-to-r from-amber-600 to-orange-500 hover:from-amber-500 hover:to-orange-400 text-white font-bold py-4 rounded-xl shadow-lg transform transition hover:scale-[1.02] text-lg"><i class="fa-solid fa-gavel mr-2"></i> Zahájit soudní hlasování</button>`;
-            } else if (data.is_alive && !isHost) {
-                html += `<div class="text-center text-slate-400 text-sm italic"><i class="fa-solid fa-hourglass-half animate-pulse mr-1"></i> Čeká se, až hostitel zahájí hlasování. Mluvte a obhajujte se!</div>`;
-            }
-            content.innerHTML = html;
-        });
-
-        function startVoting() { socket.emit('start_voting'); }
-
-        socket.on('voting_started', function(data) {
-            document.getElementById('phase-title').innerText = "Fáze: Soud";
-            document.getElementById('phase-title').className = "text-3xl font-black tracking-widest mb-2 uppercase text-orange-500";
-            
-            const content = document.getElementById('dynamic-game-content');
-            if (data.all_roles) return; 
-
-            let html = `<h3 class="text-xl font-bold text-slate-200 mb-6 text-center"><i class="fa-solid fa-scale-balanced text-orange-400 mr-2"></i>Vyber, koho chceš poslat na oprátku:</h3><div class="grid grid-cols-2 gap-3">`;
-            data.candidates.forEach(c => {
-                html += `<button onclick="submitVote('${c}')" class="bg-slate-800 hover:bg-orange-600 text-white font-bold py-3 px-4 rounded-xl border border-slate-700 transition shadow-sm">${c}</button>`;
-            });
-            html += `</div>`;
-            content.innerHTML = html;
-        });
-
-        function submitVote(target) {
-            socket.emit('submit_vote', {target: target});
-            document.getElementById('dynamic-game-content').innerHTML = `
-                <div class="flex flex-col items-center justify-center py-8">
-                    <i class="fa-solid fa-gavel text-4xl text-orange-500 mb-4 animate-bounce"></i>
-                    <p class="text-lg font-bold text-orange-300">Hlas zaznamenán!</p>
-                    <p class="text-slate-400 text-sm mt-2">Čeká se na verdikt ostatních...</p>
-                </div>`;
-        }
-
-        socket.on('trial_results', function(data) {
-            const content = document.getElementById('dynamic-game-content');
-            let html = `
-                <div class="text-center p-6 bg-slate-900 rounded-xl border border-slate-700 shadow-inner mb-6">
-                    <h3 class="text-xl font-bold mb-4 text-orange-500"><i class="fa-solid fa-scroll mr-2"></i>Výsledek soudu</h3>
-                    ${data.msg}
-                </div>`;
-            
-            if (isHost) {
-                html += `<button onclick="proceedToNight()" class="w-full bg-gradient-to-r from-indigo-700 to-blue-600 hover:from-indigo-600 hover:to-blue-500 text-white font-bold py-4 rounded-xl shadow-lg transform transition hover:scale-[1.02] text-lg"><i class="fa-solid fa-moon mr-2"></i> Jít spát (Nová noc)</button>`;
-            } else {
-                html += `<div class="text-center text-slate-400 text-sm italic"><i class="fa-solid fa-hourglass-half animate-pulse mr-1"></i> Čeká se, až hostitel ukončí den.</div>`;
-            }
-            content.innerHTML = html;
-        });
-
-        function proceedToNight() { socket.emit('proceed_to_night'); }
-
-        socket.on('game_over', function(data) {
-            Swal.fire({
-                title: data.winner === 'Mafie' ? 'Mafie vítězí!' : data.winner === 'Šašek' ? 'Šašek vyhrál!' : 'Město vítězí!',
-                html: data.msg,
-                icon: data.winner === 'Mafie' ? 'error' : 'success',
-                background: '#1e293b', color: '#fff', confirmButtonColor: '#3b82f6',
-                confirmButtonText: 'Zpět do Lobby',
-                allowOutsideClick: false
-            }).then(() => {
-                document.getElementById('game-screen').classList.add('hide');
-                document.getElementById('lobby-screen').classList.remove('hide');
-            });
-        });
-    </script>
-</body>
-</html>
+if __name__ == '__main__':
+    socketio.run(app, debug=True, host='0.0.0.0', port=5000)
