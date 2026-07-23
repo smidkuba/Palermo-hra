@@ -31,13 +31,20 @@ def handle_disconnect():
     if sid in game_state["players"]:
         del game_state["players"][sid]
         
-        if game_state["host_sid"] == sid:
-            alive_sids = list(game_state["players"].keys())
-            game_state["host_sid"] = alive_sids[0] if alive_sids else None
-            if game_state["host_sid"]:
-                emit('host_status', {'is_host': True}, to=game_state["host_sid"])
-                
-        emit('update_players', get_player_names(), broadcast=True)
+        # NOVINKA: Když odejdou všichni, server se sám vyčistí
+        if len(game_state["players"]) == 0:
+            game_state["phase"] = "Lobby"
+            game_state["host_sid"] = None
+            game_state["votes"] = {}
+            game_state["night_actions"] = {}
+        else:
+            if game_state["host_sid"] == sid:
+                alive_sids = list(game_state["players"].keys())
+                game_state["host_sid"] = alive_sids[0] if alive_sids else None
+                if game_state["host_sid"]:
+                    emit('host_status', {'is_host': True}, to=game_state["host_sid"])
+                    
+            emit('update_players', get_player_names(), broadcast=True)
 
 @socketio.on('join_game')
 def handle_join(data):
@@ -60,8 +67,13 @@ def handle_join(data):
 
 @socketio.on('start_game')
 def handle_start(data):
-    if game_state["phase"] != "Lobby": return
+    # NOVINKA: Host má absolutní moc, může hru kdykoliv restartovat
     if request.sid != game_state["host_sid"]: return
+    
+    # Tvrdý reset paměti serveru před každým startem
+    game_state["phase"] = "Lobby"
+    game_state["votes"] = {}
+    game_state["night_actions"] = {}
     
     total_players = len(game_state["players"])
     
@@ -380,7 +392,6 @@ def check_night_end():
     
     game_state["phase"] = "Den"
     
-    # Připravíme aktuální role pro mrtvé i přes den!
     all_roles_payload = [{"name": p["name"], "role": p["actual_role"], "alive": p["alive"]} for p in game_state["players"].values()]
     
     for sid, p in game_state["players"].items():
@@ -402,7 +413,6 @@ def handle_start_voting():
     game_state["votes"] = {}
     
     alive_players = [p["name"] for p in game_state["players"].values() if p["alive"]]
-    # Připravíme aktuální role pro mrtvé i k soudu!
     all_roles_payload = [{"name": p["name"], "role": p["actual_role"], "alive": p["alive"]} for p in game_state["players"].values()]
     
     for sid, p in game_state["players"].items():
