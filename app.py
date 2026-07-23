@@ -4,7 +4,7 @@ import random
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'super-tajne-palermo-heslo'
-socketio = SocketIO(app, cors_allowed_origins="*")
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
 game_state = {
     "players": {},
@@ -23,7 +23,8 @@ def index():
 
 @socketio.on('connect')
 def handle_connect():
-    pass
+    # Poslechneme si aktuální stav lobby hned při připojení
+    emit('update_players', get_player_names())
 
 @socketio.on('disconnect')
 def handle_disconnect():
@@ -31,7 +32,6 @@ def handle_disconnect():
     if sid in game_state["players"]:
         del game_state["players"][sid]
         
-        # NOVINKA: Když odejdou všichni, server se sám vyčistí
         if len(game_state["players"]) == 0:
             game_state["phase"] = "Lobby"
             game_state["host_sid"] = None
@@ -44,7 +44,7 @@ def handle_disconnect():
                 if game_state["host_sid"]:
                     emit('host_status', {'is_host': True}, to=game_state["host_sid"])
                     
-            emit('update_players', get_player_names(), broadcast=True)
+        emit('update_players', get_player_names(), broadcast=True)
 
 @socketio.on('join_game')
 def handle_join(data):
@@ -63,14 +63,13 @@ def handle_join(data):
         game_state["host_sid"] = sid
     
     emit('host_status', {'is_host': (game_state["host_sid"] == sid)}, to=sid)
+    # Zde zajistíme, že se seznam hráčů okamžitě rozesleš všem v reálném čase
     emit('update_players', get_player_names(), broadcast=True)
 
 @socketio.on('start_game')
 def handle_start(data):
-    # NOVINKA: Host má absolutní moc, může hru kdykoliv restartovat
     if request.sid != game_state["host_sid"]: return
     
-    # Tvrdý reset paměti serveru před každým startem
     game_state["phase"] = "Lobby"
     game_state["votes"] = {}
     game_state["night_actions"] = {}
