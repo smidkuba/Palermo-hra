@@ -198,12 +198,15 @@ def start_night():
     all_roles_payload = [{"name": p["name"], "role": p["actual_role"], "alive": p["alive"]} for p in game_state["players"].values()]
     
     for sid, player in game_state["players"].items():
+        # Zde odfiltrujeme aktuálního hráče ze seznamu parťáků mafie
+        mates = [m for m in mafia_names if m != player["name"]] if player["actual_role"] == "Mafián" else []
+        
         payload = {
             "role": player["perceived_role"],
             "phase": game_state["phase"],
             "alive": player["alive"],
             "alive_players": alive_players,
-            "mafia_mates": mafia_names if player["actual_role"] == "Mafián" else []
+            "mafia_mates": mates
         }
         if not player["alive"]: payload["all_roles"] = all_roles_payload
         emit('game_started', payload, to=sid)
@@ -391,7 +394,6 @@ def handle_submit_vote(data):
     sid = request.sid
     if sid not in game_state["players"] or not game_state["players"][sid]["alive"]: return
     
-    # Zabezpečení proti kliknutí na sebe (kdyby se o to někdo pokusil)
     target = data.get('target')
     voter_name = game_state["players"][sid]["name"]
     if target == voter_name: return
@@ -406,7 +408,6 @@ def evaluate_votes():
     
     for sid, target in game_state["votes"].items():
         voter_name = game_state["players"][sid]["name"]
-        
         vote_points[target] = vote_points.get(target, 0) + 1
         vote_details.setdefault(target, []).append(voter_name)
 
