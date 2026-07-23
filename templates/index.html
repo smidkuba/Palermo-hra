@@ -125,7 +125,7 @@
                         <p class="mb-2">Hra se dělí na dvě hlavní fáze:</p>
                         <ul class="list-disc pl-5 space-y-1 mb-4">
                             <li><b>Noc:</b> Hráči se speciálními rolemi tajně vykonávají své akce (kliknutím na dům hráče). Ostatní spí.</li>
-                            <li><b>Den:</b> Ráno se dozvíte události noci. Město volně diskutuje o tom, kdo lže, a snaží se odhalit Mafiány. Závěrem dne je <b>Soud</b>, kde se hlasuje, koho město popraví.</li>
+                            <li><b>Den:</b> Ráno se dozvíte události noci. Město volně diskutuje o tom, kdo lže, a snaží se odhalit Mafiány. Závěrem dne je <b>Soud</b>, kde se hlasuje, koho město popraví. Nemůžete hlasovat pro sebe a vždy máte možnost hlasování přeskočit.</li>
                         </ul>
                         <p class="mb-4">Cílem <b>Města</b> je odhalit a popravit všechny Mafiány. Cílem <b>Mafie</b> je přežít a přečíslit Město.</p>
 
@@ -317,10 +317,16 @@
             else roleEl.className = "text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-500 drop-shadow-md";
 
             const matesEl = document.getElementById('mafia-mates');
-            if(data.mafia_mates.length > 0) {
-                matesEl.innerHTML = `<i class="fa-solid fa-users"></i> Spoluhráči mafie: ${data.mafia_mates.join(', ')}`;
+            if(data.role === "Mafián") {
+                if(data.mafia_mates.length > 0) {
+                    matesEl.innerHTML = `<i class="fa-solid fa-users text-rose-500"></i> Spoluhráči mafie: <span class="text-white">${data.mafia_mates.join(', ')}</span>`;
+                } else {
+                    matesEl.innerHTML = `<i class="fa-solid fa-user-ninja text-rose-500"></i> Jsi jediný Mafián (hraješ sám)`;
+                }
                 matesEl.classList.remove('hide');
-            } else { matesEl.classList.add('hide'); }
+            } else { 
+                matesEl.classList.add('hide'); 
+            }
 
             const content = document.getElementById('dynamic-game-content');
             if (!data.alive) {
@@ -413,14 +419,29 @@
             const content = document.getElementById('dynamic-game-content');
             if (data.all_roles) return; 
 
-            let html = `<h3 class="text-xl font-bold text-slate-200 mb-6 text-center"><i class="fa-solid fa-scale-balanced text-orange-400 mr-2"></i>Vyber, koho chceš poslat na oprátku:</h3><div class="grid grid-cols-2 gap-3">`;
+            let html = `<h3 class="text-xl font-bold text-slate-200 mb-6 text-center"><i class="fa-solid fa-scale-balanced text-orange-400 mr-2"></i>Vyber, koho pošleš na oprátku:</h3>`;
+            
+            // Vizuálně vylepšená tlačítka hráčů
+            html += `<div class="grid grid-cols-2 gap-4 mb-6">`;
             data.candidates.forEach(c => {
-                // Tady zajišťujeme, že hráč neuvidí sám sebe jako možnost k hlasování
                 if (c !== myName) {
-                    html += `<button onclick="submitVote('${c}')" class="bg-slate-800 hover:bg-orange-600 text-white font-bold py-3 px-4 rounded-xl border border-slate-700 transition shadow-sm">${c}</button>`;
+                    html += `
+                    <button onclick="submitVote('${c}')" class="relative overflow-hidden group bg-slate-800 hover:bg-orange-600 border border-slate-700 hover:border-orange-400 text-white font-bold py-4 px-4 rounded-2xl transition-all shadow-lg transform hover:-translate-y-1">
+                        <div class="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                        <i class="fa-solid fa-user-xmark text-2xl mb-2 text-slate-500 group-hover:text-white transition-colors"></i><br>
+                        <span class="relative z-10">${c}</span>
+                    </button>`;
                 }
             });
             html += `</div>`;
+
+            // Tlačítko pro přeskočení hlasování (zvýrazněno jinak)
+            html += `
+                <button onclick="submitVote('__SKIP__')" class="w-full bg-slate-700 hover:bg-slate-600 text-slate-300 font-bold py-4 rounded-xl shadow-lg border border-slate-600 hover:border-slate-400 transition-all transform hover:-translate-y-1">
+                    <i class="fa-solid fa-person-walking-arrow-right text-xl mr-2"></i> Nezabíjet nikoho (Přeskočit)
+                </button>
+            `;
+
             content.innerHTML = html;
         });
 
