@@ -19,16 +19,29 @@
         .role-input { background: #0f172a; border: 1px solid #334155; color: #e2e8f0; text-align: center; width: 100%; border-radius: 0.5rem; padding: 0.5rem; }
         .role-input:focus { outline: none; border-color: #3b82f6; }
         .hide { display: none !important; }
+        
+        /* Hezký posuvník pro nápovědu */
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: rgba(0,0,0,0.2); border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #64748b; }
     </style>
 </head>
 <body class="min-h-screen flex flex-col items-center p-4 selection:bg-rose-500 selection:text-white">
 
-    <!-- HLAVIČKA / LOGO -->
-    <div class="mt-8 mb-6 text-center animate-bounce" style="animation-duration: 3s;">
-        <h1 class="text-5xl font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-rose-500 to-orange-400 drop-shadow-lg">
-            <i class="fa-solid fa-masks-theater text-rose-500 mr-2"></i>PALERMO
-        </h1>
-        <p class="text-rose-400 font-bold tracking-widest text-sm mt-1 uppercase opacity-80">Feign Edice</p>
+    <!-- HLAVIČKA / LOGO S NÁPOVĚDOU -->
+    <div class="mt-4 mb-6 relative w-full max-w-2xl flex justify-center items-center">
+        <!-- Tlačítko Nápovědy -->
+        <button onclick="showHelp()" class="absolute right-0 top-0 mt-2 mr-2 bg-slate-800 hover:bg-sky-600 text-sky-400 hover:text-white rounded-full w-10 h-10 flex items-center justify-center transition-all shadow-lg border border-slate-600 z-10" title="Nápověda k rolím">
+            <i class="fa-solid fa-question text-xl"></i>
+        </button>
+
+        <div class="text-center animate-bounce mt-4" style="animation-duration: 3s;">
+            <h1 class="text-5xl font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-rose-500 to-orange-400 drop-shadow-lg">
+                <i class="fa-solid fa-masks-theater text-rose-500 mr-2"></i>PALERMO
+            </h1>
+            <p class="text-rose-400 font-bold tracking-widest text-sm mt-1 uppercase opacity-80">Feign Edice</p>
+        </div>
     </div>
 
     <!-- 1. PŘIHLAŠOVACÍ OBRAZOVKA -->
@@ -50,17 +63,13 @@
                     <span><i class="fa-solid fa-users text-sky-400 mr-2"></i>Hráči v Lobby</span>
                     <span id="player-count" class="bg-slate-800 px-3 py-1 rounded-lg text-sm">0</span>
                 </h3>
-                <ul id="players-list" class="space-y-2">
-                    <!-- Zde se generují hráči dynamicky -->
-                </ul>
+                <ul id="players-list" class="space-y-2"></ul>
             </div>
 
             <!-- Nastavení Hry (Vidí pouze Host) -->
             <div id="host-controls" class="glass-panel rounded-2xl p-6 shadow-xl hide">
                 <h3 class="text-xl font-bold text-slate-200 mb-4"><i class="fa-solid fa-sliders text-amber-400 mr-2"></i>Nastavení rolí</h3>
-                <div class="grid grid-cols-2 gap-3 mb-6" id="roles-grid">
-                    <!-- Generováno přes JS pro čistší kód -->
-                </div>
+                <div class="grid grid-cols-2 gap-3 mb-6" id="roles-grid"></div>
                 
                 <div class="space-y-3 mb-6 bg-slate-800/50 p-4 rounded-xl border border-slate-700">
                     <label class="flex items-center space-x-3 cursor-pointer">
@@ -89,26 +98,76 @@
         </div>
     </div>
 
-    <!-- 3. HERNÍ OBRAZOVKA (Noc / Den) -->
+    <!-- 3. HERNÍ OBRAZOVKA -->
     <div id="game-screen" class="w-full max-w-2xl hide">
-        <!-- Hlavička hráče -->
         <div class="glass-panel rounded-2xl p-6 shadow-xl mb-6 text-center relative overflow-hidden border-t-4 border-rose-500">
             <h2 id="phase-title" class="text-3xl font-black text-white tracking-widest mb-2 uppercase">FÁZE</h2>
             <div class="text-slate-400 mb-4">Tvoje role pro tuto hru:</div>
             <div id="my-role" class="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-500 drop-shadow-md">Neznámá</div>
             <div id="mafia-mates" class="mt-4 text-sm text-rose-400 font-bold hide"></div>
         </div>
-
-        <!-- Dynamický obsah podle fáze -->
-        <div id="dynamic-game-content" class="glass-panel rounded-2xl p-6 shadow-xl">
-            <!-- Sem se vkládá obsah noci, zprávy ze dne, hlasování atd. -->
-        </div>
+        <div id="dynamic-game-content" class="glass-panel rounded-2xl p-6 shadow-xl"></div>
     </div>
 
     <script>
         const socket = io();
         let myName = "";
         let isHost = false;
+
+        // --- NÁPOVĚDA ---
+        function showHelp() {
+            Swal.fire({
+                title: '<span class="text-2xl font-black text-white"><i class="fa-solid fa-book-open text-sky-400 mr-2"></i> Nápověda k rolím</span>',
+                html: `
+                    <div class="text-left space-y-4 text-sm text-slate-300 max-h-96 overflow-y-auto pr-2 custom-scrollbar">
+                        <p class="mb-4">Cílem <b>Města</b> je odhalit a popravit u soudu všechny mafiány. Cílem <b>Mafie</b> je přečíslit měšťany.</p>
+                        
+                        <div class="border-t border-slate-700 pt-3">
+                            <h4 class="font-bold text-rose-500 mb-1 text-base"><i class="fa-solid fa-user-secret w-5"></i> Mafián</h4>
+                            V noci vybírá cíl k zabití. (Pokud je zapnutá "Jednomyslná shoda", musí všichni mafiáni zvolit stejný dům).
+                        </div>
+                        <div class="border-t border-slate-700 pt-3">
+                            <h4 class="font-bold text-blue-400 mb-1 text-base"><i class="fa-solid fa-user-shield w-5"></i> Policista</h4>
+                            V noci zablokuje hráče. Pokud se cíl chystal v noci opustit dům, policie ho zastaví a jeho akce se neprovede.
+                        </div>
+                        <div class="border-t border-slate-700 pt-3">
+                            <h4 class="font-bold text-emerald-400 mb-1 text-base"><i class="fa-solid fa-shoe-prints w-5"></i> Stopař</h4>
+                            Zjistí, ke komu vybraný hráč v noci šel. Pokud cíl nikam nešel, najde jen prázdnou stopu.
+                        </div>
+                        <div class="border-t border-slate-700 pt-3">
+                            <h4 class="font-bold text-amber-500 mb-1 text-base"><i class="fa-solid fa-spider w-5"></i> Pastičkář</h4>
+                            Nastraží k někomu (nebo k sobě) past. První člověk s rolí, který do domu vstoupí, se chytí, nic neprovede a pastičkář zjistí jeho jméno.
+                        </div>
+                        <div class="border-t border-slate-700 pt-3">
+                            <h4 class="font-bold text-cyan-400 mb-1 text-base"><i class="fa-solid fa-magnifying-glass w-5"></i> Detektiv</h4>
+                            Zkoumá hráče. Ráno dostane 2 možné role – jedna z nich je stoprocentně ta pravá.
+                        </div>
+                        <div class="border-t border-slate-700 pt-3">
+                            <h4 class="font-bold text-green-400 mb-1 text-base"><i class="fa-solid fa-user-doctor w-5"></i> Doktor</h4>
+                            Hlídá u někoho doma. Pokud k němu přijde zabíjet mafie, cíl přežije noc.
+                        </div>
+                        <div class="border-t border-slate-700 pt-3">
+                            <h4 class="font-bold text-yellow-300 mb-1 text-base"><i class="fa-solid fa-scale-balanced w-5"></i> Starosta</h4>
+                            Nemá žádnou noční akci, ale u denního soudu se jeho hlas počítá automaticky za dva.
+                        </div>
+                        <div class="border-t border-slate-700 pt-3">
+                            <h4 class="font-bold text-fuchsia-400 mb-1 text-base"><i class="fa-solid fa-mask-face w-5"></i> Šašek</h4>
+                            Chce jediné - být přes den upálen/oběšen! Pokud u soudu přesvědčí ostatní, aby pro něj hlasovali, okamžitě sám vyhrává celou hru.
+                        </div>
+                        <div class="border-t border-slate-700 pt-3">
+                            <h4 class="font-bold text-purple-400 mb-1 text-base"><i class="fa-solid fa-face-dizzy w-5"></i> Blázen</h4>
+                            Neví, že je blázen. Vidí, že má jinou roli (např. Policista), v noci provádí akce, ale ráno dostává od serveru naprosto smyšlené výsledky, čímž zmate nejen sebe, ale i zbytek města.
+                        </div>
+                    </div>
+                `,
+                background: '#1e293b',
+                color: '#fff',
+                confirmButtonColor: '#0284c7', // Sky-600
+                confirmButtonText: '<i class="fa-solid fa-check mr-2"></i> Rozumím',
+                customClass: { popup: 'rounded-2xl border border-slate-700' },
+                width: '600px'
+            });
+        }
 
         // --- KONFIGURACE ROLÍ PRO UI ---
         const rolesConfig = [
@@ -122,7 +181,6 @@
             { id: 'mayor', name: 'Starosta', color: 'text-yellow-300', default: '0' }
         ];
 
-        // Vykreslení inputů do settings
         const rolesGrid = document.getElementById('roles-grid');
         rolesConfig.forEach(r => {
             rolesGrid.innerHTML += `
@@ -135,10 +193,8 @@
                         <option value="3" ${r.default==='3'?'selected':''}>3</option>
                         <option value="random">Náhodně</option>
                     </select>
-                </div>
-            `;
+                </div>`;
         });
-        // Extra pro Blázna (přes 2 sloupce)
         rolesGrid.innerHTML += `
             <div class="col-span-2 bg-purple-900/20 p-2 rounded-xl border border-purple-500/30 flex flex-col items-center">
                 <span class="text-xs font-bold uppercase tracking-wider mb-1 text-purple-400"><i class="fa-solid fa-mask mr-1"></i> Blázen (Fake role)</span>
@@ -147,8 +203,7 @@
                     <option value="1">1</option>
                     <option value="2">2</option>
                 </select>
-            </div>
-        `;
+            </div>`;
 
         // --- PŘIPOJENÍ ---
         function joinGame() {
@@ -170,7 +225,6 @@
             document.getElementById('lobby-screen').classList.remove('hide');
         });
 
-        // --- LOBBY & HOST ---
         socket.on('host_status', function(data) {
             isHost = data.is_host;
             if(isHost) {
@@ -191,10 +245,7 @@
                 const isMe = p.name === myName;
                 const hostBadge = p.is_host ? `<i class="fa-solid fa-crown text-amber-400 ml-2 text-sm" title="Hostitel"></i>` : '';
                 const meBadge = isMe ? `<span class="ml-2 text-xs bg-slate-700 px-2 py-0.5 rounded-full text-slate-300">Ty</span>` : '';
-                
-                // Tlačítko pro vyhození (Vidí jen Host u ostatních)
-                const kickBtn = (isHost && !isMe) ? 
-                    `<button onclick="kickPlayer('${p.name}')" class="text-rose-500 hover:text-rose-400 transition ml-auto" title="Vyhodit hráče"><i class="fa-solid fa-circle-xmark text-lg"></i></button>` : '';
+                const kickBtn = (isHost && !isMe) ? `<button onclick="kickPlayer('${p.name}')" class="text-rose-500 hover:text-rose-400 transition ml-auto" title="Vyhodit hráče"><i class="fa-solid fa-circle-xmark text-lg"></i></button>` : '';
 
                 list.innerHTML += `
                     <li class="flex items-center bg-slate-800/60 p-3 rounded-xl border border-slate-700/50">
@@ -231,7 +282,6 @@
             }).then(() => { window.location.reload(); });
         });
 
-        // --- START HRY ---
         function startGame() {
             const data = {
                 mafia_consensus: document.getElementById('set-consensus').checked,
@@ -269,18 +319,32 @@
             }
 
             if (data.phase === "Noc") {
-                let html = `<h3 class="text-xl font-bold text-slate-200 mb-4 text-center"><i class="fa-solid fa-moon text-indigo-400 mr-2"></i>Vyber cíl své noční akce:</h3><div class="grid grid-cols-2 gap-3">`;
+                let html = `<h3 class="text-xl font-bold text-slate-200 mb-6 text-center"><i class="fa-solid fa-moon text-indigo-400 mr-2"></i>Vyber dům, který v noci navštívíš:</h3>`;
+                
+                // VIZUÁLNÍ BARÁČKY (Grid mřížka domů)
+                html += `<div class="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-6">`;
                 data.alive_players.forEach(p => {
+                    // Do svého domu může jít jen Doktor (aby se vyléčil) a Pastičkář (nastražil si past)
                     if (p !== myName || data.role === "Doktor" || data.role === "Pastičkář") {
-                        html += `<button onclick="sendNightAction('${p}')" class="bg-slate-800 hover:bg-indigo-600 text-white font-bold py-3 px-4 rounded-xl border border-slate-700 transition shadow-sm">${p}</button>`;
+                        html += `
+                        <div onclick="sendNightAction('${p}')" class="cursor-pointer bg-slate-800 hover:bg-indigo-700 border border-slate-700 hover:border-indigo-400 rounded-2xl p-4 flex flex-col items-center justify-center transition-all shadow-lg transform hover:-translate-y-1 group">
+                            <div class="relative mb-2 mt-1">
+                                <i class="fa-solid fa-house-chimney text-4xl text-slate-500 group-hover:text-indigo-200 transition-colors"></i>
+                                <!-- Efekt rozsvíceného okénka při najetí myší -->
+                                <div class="absolute -bottom-1 -right-1 w-3 h-3 bg-yellow-400 rounded-sm opacity-0 group-hover:opacity-100 transition-opacity shadow-[0_0_10px_rgba(250,204,21,0.8)]"></div>
+                            </div>
+                            <span class="font-bold text-slate-300 group-hover:text-white text-center break-words w-full text-sm">${p}</span>
+                        </div>`;
                     }
                 });
-                if (data.role === "Měšťan" || data.role === "Šašek" || data.role === "Starosta") {
-                    html += `<button onclick="sendNightAction('')" class="col-span-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-4 rounded-xl shadow-lg mt-2"><i class="fa-solid fa-bed mr-2"></i> Jít spát (Nemáš akci)</button>`;
-                } else {
-                    html += `<button onclick="sendNightAction('')" class="col-span-2 bg-slate-700 hover:bg-slate-600 text-slate-300 font-bold py-3 rounded-xl mt-2"><i class="fa-solid fa-ban mr-2"></i> Zůstat doma (Nedělat nic)</button>`;
-                }
                 html += `</div>`;
+
+                // Volba nic nedělání dole
+                if (data.role === "Měšťan" || data.role === "Šašek" || data.role === "Starosta") {
+                    html += `<button onclick="sendNightAction('')" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-4 rounded-xl shadow-lg mt-2"><i class="fa-solid fa-bed mr-2"></i> Jít spát (Nemáš noční akci)</button>`;
+                } else {
+                    html += `<button onclick="sendNightAction('')" class="w-full bg-slate-700 hover:bg-slate-600 text-slate-300 font-bold py-4 rounded-xl shadow-lg mt-2"><i class="fa-solid fa-house-user mr-2"></i> Zůstat doma (Nechodit ven)</button>`;
+                }
                 content.innerHTML = html;
             }
         });
@@ -302,7 +366,6 @@
             const content = document.getElementById('dynamic-game-content');
             let html = ``;
 
-            // Osobní zprávy z noci
             if (data.personal_msgs && data.personal_msgs.length > 0) {
                 html += `<div class="mb-6 space-y-3">`;
                 data.personal_msgs.forEach(msg => {
@@ -316,7 +379,6 @@
                 html += `</div>`;
             }
 
-            // Výsledek noci
             html += `
                 <div class="text-center p-6 bg-slate-900 rounded-xl border border-slate-700 shadow-inner mb-6">
                     <h3 class="text-xl font-bold mb-3 ${data.dead ? 'text-rose-500' : 'text-emerald-400'}">
@@ -340,9 +402,9 @@
             document.getElementById('phase-title').className = "text-3xl font-black tracking-widest mb-2 uppercase text-orange-500";
             
             const content = document.getElementById('dynamic-game-content');
-            if (data.all_roles) return; // Mrtví jen koukají
+            if (data.all_roles) return; 
 
-            let html = `<h3 class="text-xl font-bold text-slate-200 mb-4 text-center"><i class="fa-solid fa-scale-balanced text-orange-400 mr-2"></i>Koho oběsíme?</h3><div class="grid grid-cols-2 gap-3">`;
+            let html = `<h3 class="text-xl font-bold text-slate-200 mb-6 text-center"><i class="fa-solid fa-scale-balanced text-orange-400 mr-2"></i>Vyber, koho chceš poslat na oprátku:</h3><div class="grid grid-cols-2 gap-3">`;
             data.candidates.forEach(c => {
                 html += `<button onclick="submitVote('${c}')" class="bg-slate-800 hover:bg-orange-600 text-white font-bold py-3 px-4 rounded-xl border border-slate-700 transition shadow-sm">${c}</button>`;
             });
