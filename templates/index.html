@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Palermo: Feign Edice</title>
+    
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        @keyframes fadeInUp { from { opacity: 0; transform: translateY(15px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes popIn { 0% { opacity: 0; transform: scale(0.95); } 100% { opacity: 1; transform: scale(1); } }
+        @keyframes float { 0% { transform: translateY(0px); } 50% { transform: translateY(-4px); } 100% { transform: translateY(0px); } }
+        
+        .animate-fade-in-up { animation: fadeInUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+        .animate-pop-in { animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
+        .animate-float { animation: float 3s ease-in-out infinite; }
+        
+        .hidden { display: none !important; }
+        
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+        }
+
+        select { background-image: none; appearance: none; text-align: center; }
+        
+        body {
+            background: radial-gradient(circle at top, #1e293b 0%, #020617 100%);
+            background-attachment: fixed;
+            color: #f8fafc;
+        }
+    </style>
+</head>
+<body class="font-sans min-h-screen flex flex-col items-center p-4 selection:bg-sky-500 selection:text-white">
+
+    <div id="info-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in-up">
+        <div class="bg-slate-800 rounded-3xl border border-slate-600 shadow-2xl max-w-sm w-full p-8 relative">
+            <button onclick="closeInfoModal()" class="absolute top-4 right-4 text-slate-400 hover:text-white transition-colors bg-slate-700 hover:bg-slate-600 rounded-full w-8 h-8 flex items-center justify-center">
+                <i class="fa-solid fa-xmark text-xl"></i>
+            </button>
+            <div class="text-center mb-6 mt-2">
+                <i id="info-modal-icon" class="text-5xl mb-4 opacity-90"></i>
+                <h3 id="info-modal-title" class="text-2xl font-black uppercase tracking-widest"></h3>
+            </div>
+            <div class="bg-slate-900/50 p-5 rounded-2xl border border-slate-700/50">
+                <p id="info-modal-desc" class="text-slate-300 text-sm font-medium leading-relaxed text-center"></p>
+            </div>
+            <button onclick="closeInfoModal()" class="w-full mt-6 bg-slate-700 hover:bg-slate-600 text-white font-bold py-3.5 rounded-xl transition-colors">
+                Rozumím, jdeme hrát!
+            </button>
+        </div>
+    </div>
+
+    <div class="max-w-md w-full glass-panel rounded-3xl p-6 mt-2 animate-fade-in-up transition-all duration-300">
+        
+        <div class="text-center mb-8 animate-float">
+            <h1 class="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-red-500 to-rose-400 uppercase tracking-widest mb-1">
+                <i class="fa-solid fa-masks-theater text-red-500 mr-2"></i>Palermo
+            </h1>
+            <p class="text-amber-500 font-bold tracking-[0.3em] text-[10px] uppercase">Feign Edice</p>
+        </div>
+
+        <div id="login-section" class="space-y-4 animate-pop-in">
+            <div class="relative">
+                <i class="fa-solid fa-gamepad absolute left-4 top-1/2 transform -translate-y-1/2 text-slate-500 text-lg"></i>
+                <input type="text" id="player-name" placeholder="Zadej svou přezdívku..." class="w-full bg-slate-900/80 border border-slate-700 rounded-2xl pl-12 pr-4 py-4 text-white focus:outline-none focus:border-red-500 transition-all text-base shadow-inner">
+            </div>
+            <button onclick="joinGame()" class="group w-full bg-gradient-to-r from-red-600 to-rose-500 hover:from-red-500 hover:to-rose-400 text-white font-bold py-4 px-4 rounded-2xl shadow-lg transform hover:translate-y-[-2px] active:translate-y-[1px] transition-all duration-200 tracking-wide">
+                Připojit se do hry <i class="fa-solid fa-arrow-right ml-1 group-hover:translate-x-1 transition-transform"></i>
+            </button>
+        </div>
+
+        <div id="lobby-section" class="hidden space-y-5 animate-fade-in-up">
+            <div class="bg-slate-900/40 p-5 rounded-2xl border border-slate-700/50">
+                <h3 class="text-xs font-bold text-slate-400 mb-3 uppercase tracking-widest flex items-center gap-2">
+                    <i class="fa-solid fa-users text-sky-400"></i> Hráči v lobby
+                </h3>
+                <ul id="player-list" class="space-y-2 text-base font-medium"></ul>
+            </div>
+            
+            <div id="guest-msg" class="text-center bg-slate-800/50 border border-slate-700 rounded-2xl text-slate-300 font-medium p-6 hidden animate-pulse flex flex-col items-center gap-3">
+                <i class="fa-solid fa-hourglass-half text-2xl text-amber-500"></i>
+                <span class="text-sm">Čekáme na zakladatele, až hru odstartuje...</span>
+            </div>
+
+            <div id="settings-panel" class="hidden bg-slate-900/40 p-5 rounded-2xl border border-slate-700/50">
+                <h3 class="text-xs font-bold text-slate-400 mb-4 uppercase tracking-widest flex items-center gap-2">
+                    <i class="fa-solid fa-sliders text-emerald-400"></i> Nastavení rolí
+                </h3>
+                
+                <div class="grid grid-cols-2 gap-2 mb-5">
+                    <div class="bg-slate-800/60 p-2.5 rounded-xl border border-slate-700 text-center">
+                        <label class="text-[11px] text-red-400 font-bold block mb-1 uppercase">Mafiáni</label>
+                        <select id="cfg-mafia" class="w-full bg-slate-900 text-white rounded-lg p-1 text-sm font-bold outline-none border border-slate-700"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="random">Náhodně</option></select>
+                    </div>
+                    <div class="bg-slate-800/60 p-2.5 rounded-xl border border-slate-700 text-center">
+                        <label class="text-[11px] text-blue-400 font-bold block mb-1 uppercase">Policista</label>
+                        <select id="cfg-pol" class="w-full bg-slate-900 text-white rounded-lg p-1 text-sm font-bold outline-none border border-slate-700"><option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="random">Náhodně</option></select>
+                    </div>
+                    <div class="bg-slate-800/60 p-2.5 rounded-xl border border-slate-700 text-center">
+                        <label class="text-[11px] text-lime-400 font-bold block mb-1 uppercase">Stopař</label>
+                        <select id="cfg-track" class="w-full bg-slate-900 text-white rounded-lg p-1 text-sm font-bold outline-none border border-slate-700"><option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="random">Náhodně</option></select>
+                    </div>
+                    <div class="bg-slate-800/60 p-2.5 rounded-xl border border-slate-700 text-center">
+                        <label class="text-[11px] text-orange-400 font-bold block mb-1 uppercase">Pastičkář</label>
+                        <select id="cfg-trap" class="w-full bg-slate-900 text-white rounded-lg p-1 text-sm font-bold outline-none border border-slate-700"><option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="random">Náhodně</option></select>
+                    </div>
+                    <div class="bg-slate-800/60 p-2.5 rounded-xl border border-slate-700 text-center">
+                        <label class="text-[11px] text-sky-400 font-bold block mb-1 uppercase">Detektiv</label>
+                        <select id="cfg-det" class="w-full bg-slate-900 text-white rounded-lg p-1 text-sm font-bold outline-none border border-slate-700"><option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="random">Náhodně</option></select>
+                    </div>
+                    <div class="bg-slate-800/60 p-2.5 rounded-xl border border-slate-700 text-center">
+                        <label class="text-[11px] text-emerald-400 font-bold block mb-1 uppercase">Doktor</label>
+                        <select id="cfg-doc" class="w-full bg-slate-900 text-white rounded-lg p-1 text-sm font-bold outline-none border border-slate-700"><option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="random">Náhodně</option></select>
+                    </div>
+                    <div class="bg-slate-800/60 p-2.5 rounded-xl border border-slate-700 text-center">
+                        <label class="text-[11px] text-amber-400 font-bold block mb-1 uppercase">Šašek</label>
+                        <select id="cfg-jester" class="w-full bg-slate-900 text-white rounded-lg p-1 text-sm font-bold outline-none border border-slate-700"><option value="0">0</option><option value="1">1</option><option value="random">Náhodně</option></select>
+                    </div>
+                    <div class="bg-slate-800/60 p-2.5 rounded-xl border border-slate-700 text-center">
+                        <label class="text-[11px] text-emerald-300 font-bold block mb-1 uppercase">Starosta</label>
+                        <select id="cfg-mayor" class="w-full bg-slate-900 text-white rounded-lg p-1 text-sm font-bold outline-none border border-slate-700"><option value="0">0</option><option value="1">1</option><option value="random">Náhodně</option></select>
+                    </div>
+                    <div class="bg-purple-900/10 p-2.5 rounded-xl border border-purple-800/30 text-center col-span-2">
+                        <label class="text-[11px] text-purple-400 font-bold block mb-1 uppercase"><i class="fa-solid fa-face-dizzy mr-1"></i>Blázen (Fake role)</label>
+                        <select id="cfg-insane" class="w-full bg-slate-900 text-white rounded-lg p-1 text-sm font-bold outline-none border border-purple-900/50"><option value="0">Vypnuto</option><option value="1">Zapnuto (1)</option><option value="2">Zapnuto (2)</option><option value="random">Náhodně</option></select>
+                    </div>
+                </div>
+                
+                <div class="space-y-2 bg-slate-900/60 p-4 rounded-xl border border-slate-700/50 text-sm">
+                    <label class="flex items-center space-x-3 cursor-pointer group">
+                        <input type="checkbox" id="cfg-consensus" class="w-4 h-4 accent-red-500 rounded border-slate-600">
+                        <span class="font-medium text-slate-300 group-hover:text-white transition-colors">Jednomyslná shoda Mafie</span>
+                    </label>
+                    <label class="flex items-center space-x-3 cursor-pointer group">
+                        <input type="checkbox" id="cfg-reveal" class="w-4 h-4 accent-sky-500 rounded border-slate-600" checked>
+                        <span class="font-medium text-slate-300 group-hover:text-white transition-colors">Odhalit pravou roli po smrti</span>
+                    </label>
+                    <label class="flex items-center space-x-3 cursor-pointer group">
+                        <input type="checkbox" id="cfg-public" class="w-4 h-4 accent-amber-500 rounded border-slate-600" checked>
+                        <span class="font-medium text-slate-300 group-hover:text-white transition-colors">Veřejné hlasování u soudu</span>
+                    </label>
+                </div>
+
+                <button onclick="startGame()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-4 px-4 rounded-2xl shadow-[0_4px_15px_rgba(16,185,129,0.3)] transform hover:translate-y-[-2px] active:translate-y-[1px] transition-all mt-6 uppercase tracking-wider text-sm">
+                    <i class="fa-solid fa-play mr-1"></i> Odstartovat hru
+                </button>
+                <p id="error-msg" class="text-red-400 text-xs text-center font-bold mt-3"></p>
+            </div>
+        </div>
+
+        <div id="game-section" class="hidden text-center space-y-4 animate-pop-in w-full">
+            
+            <div id="death-banner" class="hidden bg-gradient-to-r from-red-900/80 to-slate-900/80 border-b-2 border-red-600 p-4 rounded-2xl mb-4 flex items-center justify-center gap-3 shadow-[0_0_20px_rgba(220,38,38,0.3)] animate-pop-in">
+                <i class="fa-solid fa-ghost text-3xl text-red-400 animate-float"></i>
+                <div class="text-left">
+                    <span class="font-black text-white text-lg tracking-widest uppercase block">Režim Ducha</span>
+                    <span class="text-xs text-red-200 font-medium">Sleduješ hru, vidíš všechny role, ale nesmíš mluvit!</span>
+                </div>
+            </div>
+
+            <div id="role-container" class="bg-slate-800/80 p-6 rounded-3xl border border-slate-700 shadow-sm relative overflow-hidden flex flex-col items-center">
+                <p class="text-slate-400 uppercase tracking-widest text-[10px] font-bold mb-1">Tvoje tajná role</p>
+                <div class="flex items-center justify-center gap-2 mb-2 relative">
+                    <h2 id="role-display" class="text-4xl font-black text-white tracking-tight">Role</h2>
+                    <button onclick="openInfoModal()" class="text-sky-400 hover:text-sky-300 transition-transform hover:scale-110 active:scale-90 ml-1">
+                        <i class="fa-solid fa-circle-info text-xl drop-shadow-md"></i>
+                    </button>
+                </div>
+                <div id="mafia-mates" class="hidden mt-2 bg-slate-900/50 border border-red-900/50 rounded-full px-4 py-1.5 text-xs text-red-400 font-bold"></div>
+            </div>
+
+            <div id="trial-results" class="hidden bg-slate-800/90 p-6 rounded-3xl border border-slate-700 shadow-lg animate-pop-in">
+                <div class="flex items-center justify-center gap-2 text-amber-500 mb-4">
+                    <i class="fa-solid fa-gavel text-xl"></i>
+                    <span class="text-xs font-bold uppercase tracking-widest">Výsledek soudu</span>
+                </div>
+                
+                <div id="trial-results-text" class="text-base text-slate-200 font-medium leading-relaxed bg-slate-900/50 p-4 rounded-xl border border-slate-700/50"></div>
+                
+                <div id="trial-wait-msg" class="mt-5 hidden">
+                    <p class="text-slate-400 text-xs font-bold uppercase tracking-widest flex items-center justify-center gap-2">
+                        <i class="fa-solid fa-spinner fa-spin"></i> Čeká se na zakladatele...
+                    </p>
+                </div>
+
+                <button id="btn-next-phase" onclick="socket.emit('proceed_to_night')" class="hidden mt-5 w-full bg-slate-700 hover:bg-slate-600 text-white font-bold py-3.5 rounded-xl transition-all text-sm uppercase tracking-wider">
+                    <i class="fa-solid fa-moon mr-2 text-sky-300"></i> Jít spát (Další noc)
+                </button>
+            </div>
+
+            <div id="active-game-screen" class="bg-slate-800/50 p-5 rounded-3xl border border-slate-700/50 shadow-sm transition-all duration-300 w-full">
+                
+                <div class="flex justify-center items-center gap-2 mb-4 bg-slate-900/50 py-2 rounded-full border border-slate-700/50 w-32 mx-auto">
+                    <i id="phase-icon" class="text-lg"></i>
+                    <p id="phase-display" class="text-lg font-black tracking-wider uppercase"></p>
+                </div>
+                
+                <div id="msg-container" class="w-full animate-fade-in-up"></div>
+                
+                <div id="personal-events" class="hidden mt-6 w-full text-left">
+                    <h4 class="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-3 flex items-center gap-2">
+                        <i class="fa-solid fa-list-check text-sky-400"></i> Noční svodka
+                    </h4>
+                    <div id="personal-events-list" class="space-y-3"></div>
+                </div>
+                
+                <div id="action-container" class="mt-4 hidden animate-fade-in-up w-full">
+                    <p id="action-prompt" class="text-slate-300 font-medium mb-3 text-sm"></p>
+                    <div id="target-list" class="w-full"></div>
+                </div>
+
+                <button id="btn-start-voting" onclick="socket.emit('start_voting')" class="hidden mt-6 w-full bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-white font-black py-4 rounded-2xl shadow-[0_4px_15px_rgba(245,158,11,0.3)] transform hover:-translate-y-1 active:translate-y-0 transition-all animate-pop-in text-sm uppercase tracking-widest">
+                    <i class="fa-solid fa-scale-balanced mr-2"></i> Zahájit Soud
+                </button>
+            </div>
+        </div>
+        
+        <div id="game-over-section" class="hidden w-full text-center space-y-6 py-6 animate-pop-in">
+            <h2 class="text-sm font-bold text-slate-400 uppercase tracking-widest mb-2">Konec hry</h2>
+            <div class="bg-slate-800/90 p-8 rounded-3xl border border-slate-700 shadow-xl relative overflow-hidden flex flex-col items-center">
+                <div id="winner-display" class="text-center w-full"></div>
+                <div class="h-px w-3/4 bg-slate-700 my-5"></div>
+                <div id="game-over-msg" class="text-sm text-slate-300 font-medium leading-relaxed"></div>
+            </div>
+            
+            <button onclick="returnToLobby()" class="w-full bg-slate-700 hover:bg-slate-600 text-white font-bold py-4 rounded-2xl transition-all text-sm uppercase tracking-wider shadow-lg">
+                <i class="fa-solid fa-rotate-right mr-2"></i> Hrát znovu se stejnou partou
+            </button>
+        </div>
+
+    </div>
+
+    <script>
+        const socket = io();
+        const ui = {
+            login: document.getElementById('login-section'),
+            lobby: document.getElementById('lobby-section'),
+            settings: document.getElementById('settings-panel'),
+            guestMsg: document.getElementById('guest-msg'),
+            game: document.getElementById('game-section'),
+            gameOver: document.getElementById('game-over-section'),
+            deathBanner: document.getElementById('death-banner'), 
+            roleContainer: document.getElementById('role-container'), 
+            active: document.getElementById('active-game-screen'),
+            trialRes: document.getElementById('trial-results'),
+            phase: document.getElementById('phase-display'),
+            phaseIcon: document.getElementById('phase-icon'),
+            msg: document.getElementById('msg-container'),
+            personalEvents: document.getElementById('personal-events'),
+            personalEventsList: document.getElementById('personal-events-list'),
+            action: document.getElementById('action-container'),
+            targetList: document.getElementById('target-list'),
+            prompt: document.getElementById('action-prompt'),
+            btnVoting: document.getElementById('btn-start-voting'),
+            btnNextPhase: document.getElementById('btn-next-phase'),
+            trialWaitMsg: document.getElementById('trial-wait-msg'),
+            mafiaMates: document.getElementById('mafia-mates'),
+            roleDisplay: document.getElementById('role-display'),
+            infoModal: document.getElementById('info-modal'),
+            infoIcon: document.getElementById('info-modal-icon'),
+            infoTitle: document.getElementById('info-modal-title'),
+            infoDesc: document.getElementById('info-modal-desc')
+        };
+        
+        let myName = "";
+        let isHost = false;
+        let isAlive = true;
+        let myCurrentRole = "Měšťan";
+
+        const roleConfig = {
+            'Mafián': { color: 'text-red-500', border: 'border-red-500/50', icon: 'fa-user-secret', bg: 'drop-shadow-md' },
+            'Policista': { color: 'text-blue-400', border: 'border-blue-400/50', icon: 'fa-handcuffs', bg: 'drop-shadow-md' },
+            'Stopař': { color: 'text-lime-400', border: 'border-lime-400/50', icon: 'fa-shoe-prints', bg: 'drop-shadow-md' },
+            'Pastičkář': { color: 'text-orange-400', border: 'border-orange-400/50', icon: 'fa-dharmachakra', bg: 'drop-shadow-md' },
+            'Doktor': { color: 'text-emerald-400', border: 'border-emerald-400/50', icon: 'fa-user-doctor', bg: 'drop-shadow-md' },
+            'Detektiv': { color: 'text-sky-400', border: 'border-sky-400/50', icon: 'fa-magnifying-glass', bg: 'drop-shadow-md' },
+            'Šašek': { color: 'text-amber-500', border: 'border-amber-500/50', icon: 'fa-masks-theater', bg: 'drop-shadow-md' },
+            'Starosta': { color: 'text-emerald-300', border: 'border-emerald-300/50', icon: 'fa-building-columns', bg: 'drop-shadow-md' },
+            'Měšťan': { color: 'text-slate-300', border: 'border-slate-500/50', icon: 'fa-user', bg: 'drop-shadow-sm' }
+        };
+
+        const roleDescriptions = {
+            'Mafián': "Jsi zloduch! 🦹‍♂️ V noci se tajně domluvíš s ostatními mafiány a vyberete si jeden domeček. Toho hráče vyřadíte ze hry.",
+            'Policista': "Jsi strážce zákona! 🚓 V noci můžeš zamknout něčí dům. Ten člověk pak nesmí ven a jeho noční akce se vůbec nestane!",
+            'Stopař': "Jsi velký pátrač! 👣 Když v noci sleduješ nějaký dům, zjistíš, ke komu přesně šel ten hráč na návštěvu.",
+            'Pastičkář': "Jsi šikovný kutil! 🛠️ Můžeš před něčí dům položit past. Kdo do toho domu v noci přijde, chytí se do pasti a uteče s prázdnou!",
+            'Doktor': "Jsi zachránce! 🚑 Vyber si někoho, koho chceš v noci hlídat. Pokud by ho chtěli vyřadit zloduchové, ty ho zachráníš!",
+            'Detektiv': "Jsi chytrý vyšetřovatel! 🕵️‍♂️ Zkoumáš lidi a hra ti napoví dvě možné role, co by ten člověk mohl být. Jedna z nich je vždycky pravda!",
+            'Šašek': "Jsi vtipálek! 🤡 Tvým jediným cílem je naštvat ostatní tak moc, aby tě přes den vyřadili. Když se ti to povede, vyhrál jsi celou hru!",
+            'Starosta': "Jsi šéf města! 🎩 Tvůj hlas při denním vyřazování platí za dva hlasy. Musíš měšťany chytře vést k vítězství.",
+            'Měšťan': "Jsi hodný obyvatel! 🏡 V noci klidně spíš a doufáš, že přežiješ. Přes den pomáháš odhalit zloduchy u soudu."
+        };
+
+        const msgColorMap = {
+            'danger': { border: 'border-red-500', bg: 'bg-red-500/10', text: 'text-red-400' },
+            'success': { border: 'border-emerald-500', bg: 'bg-emerald-500/10', text: 'text-emerald-400' },
+            'warning': { border: 'border-amber-500', bg: 'bg-amber-500/10', text: 'text-amber-400' },
+            'info': { border: 'border-sky-500', bg: 'bg-sky-500/10', text: 'text-sky-400' }
+        };
+
+        function openInfoModal() {
+            const conf = roleConfig[myCurrentRole] || roleConfig['Měšťan'];
+            const desc = roleDescriptions[myCurrentRole] || roleDescriptions['Měšťan'];
+            ui.infoIcon.className = `fa-solid ${conf.icon} ${conf.color}`;
+            ui.infoTitle.innerText = myCurrentRole;
+            ui.infoTitle.className = `text-2xl font-black uppercase tracking-widest ${conf.color}`;
+            ui.infoDesc.innerHTML = desc;
+            ui.infoModal.classList.remove('hidden');
+        }
+
+        function closeInfoModal() { ui.infoModal.classList.add('hidden'); }
+
+        function returnToLobby() {
+            ui.gameOver.classList.add('hidden');
+            ui.game.classList.add('hidden');
+            ui.lobby.classList.remove('hidden');
+        }
+
+        function joinGame() {
+            myName = document.getElementById('player-name').value.trim();
+            if (myName) {
+                socket.emit('join_game', { name: myName });
+                ui.login.classList.add('hidden');
+                ui.lobby.classList.remove('hidden');
+            }
+        }
+
+        socket.on('host_status', data => {
+            isHost = data.is_host;
+            if (isHost) {
+                ui.settings.classList.remove('hidden');
+                ui.guestMsg.classList.add('hidden');
+            } else {
+                ui.settings.classList.add('hidden');
+                ui.guestMsg.classList.remove('hidden');
+            }
+        });
+
+        function startGame() { 
+            socket.emit('start_game', {
+                mafia: document.getElementById('cfg-mafia').value,
+                pol: document.getElementById('cfg-pol').value,
+                track: document.getElementById('cfg-track').value,
+                trap: document.getElementById('cfg-trap').value,
+                det: document.getElementById('cfg-det').value,
+                doc: document.getElementById('cfg-doc').value,
+                jester: document.getElementById('cfg-jester').value,
+                insane: document.getElementById('cfg-insane').value,
+                mayor: document.getElementById('cfg-mayor').value,
+                mafia_consensus: document.getElementById('cfg-consensus').checked,
+                public_voting: document.getElementById('cfg-public').checked,
+                reveal_roles: document.getElementById('cfg-reveal').checked
+            }); 
+        }
+
+        function sendNightAction(targetName) {
+            socket.emit('night_action', { target: targetName });
+            ui.action.classList.add('hidden');
+            ui.msg.innerHTML = '<div class="bg-sky-900/20 border border-sky-800/50 p-4 rounded-xl text-sm flex items-center justify-center gap-2"><i class="fa-solid fa-check text-sky-400"></i><span class="text-sky-300">Akce připravena. Čekáme na ostatní.</span></div>';
+        }
+
+        function generateVillage(players, actionName, roleColor, roleBorder, roleIcon) {
+            return `<div class="grid grid-cols-2 gap-2 mt-2">` + players.map((p, i) => `
+                <button style="animation-delay: ${i*0.03}s" onclick="sendNightAction('${p}')"
+                    class="group relative flex flex-col items-center justify-center bg-slate-900/50 hover:bg-slate-800 border ${roleBorder} rounded-2xl p-3 transform hover:-translate-y-1 transition-all animate-fade-in-up">
+                    <i class="fa-solid fa-house-chimney text-3xl mb-1.5 text-slate-600 group-hover:${roleColor} transition-colors"></i>
+                    <span class="font-bold text-white text-sm z-10 truncate w-full">${p}</span>
+                    <span class="text-[9px] font-bold mt-1 bg-slate-950 px-2 py-1 rounded w-full text-center ${roleColor} z-10 uppercase tracking-widest flex items-center justify-center gap-1 opacity-80 group-hover:opacity-100">
+                        <i class="fa-solid ${roleIcon}"></i> ${actionName}
+                    </span>
+                </button>
+            `).join('') + `</div>`;
+        }
+
+        // GENERUJE VIZUÁLNÍ SEZNAM ROLÍ PRO DUCHY
+        function renderGhostList(allRoles) {
+            let ghostHTML = `<div class="mt-4"><h4 class="text-[10px] text-sky-300 font-bold uppercase tracking-widest mb-2 text-left"><i class="fa-solid fa-book-skull mr-1"></i> Pravé role hráčů</h4><div class="grid grid-cols-2 gap-2">`;
+            allRoles.forEach(p => {
+                let statusColor = p.alive ? 'text-white' : 'text-slate-500 line-through';
+                let icon = p.alive ? '' : '<i class="fa-solid fa-skull text-red-900 ml-1"></i>';
+                let conf = roleConfig[p.role] || roleConfig['Měšťan'];
+                ghostHTML += `<div class="bg-slate-900/50 border border-slate-700/50 rounded-xl p-2 flex flex-col items-center justify-center shadow-inner">
+                    <span class="font-bold text-xs ${statusColor} truncate w-full text-center">${p.name} ${icon}</span>
+                    <span class="text-[10px] ${conf.color} font-bold tracking-wider mt-0.5"><i class="fa-solid ${conf.icon}"></i> ${p.role}</span>
+                </div>`;
+            });
+            ghostHTML += `</div></div>`;
+            return ghostHTML;
+        }
+
+        socket.on('update_players', players => {
+            document.getElementById('player-list').innerHTML = players.map(p => 
+                `<li class="flex items-center gap-2 text-slate-300 bg-slate-800/40 px-3 py-2 rounded-lg text-sm">
+                    <span class="h-2 w-2 rounded-full bg-emerald-500"></span> ${p}
+                </li>`
+            ).join('');
+        });
+
+        socket.on('error_msg', msg => { document.getElementById('error-msg').innerText = msg; });
+        
+        socket.on('game_started', data => {
+            ui.lobby.classList.add('hidden');
+            ui.gameOver.classList.add('hidden');
+            ui.trialRes.classList.add('hidden');
+            ui.game.classList.remove('hidden');
+            ui.active.classList.remove('hidden');
+            ui.btnVoting.classList.add('hidden');
+            ui.personalEvents.classList.add('hidden');
+            
+            isAlive = data.alive;
+            myCurrentRole = data.role; 
+
+            ui.phase.innerText = "Noc";
+            ui.phase.className = "text-sm font-bold text-sky-400 tracking-widest uppercase";
+            ui.phaseIcon.className = "fa-solid fa-moon text-sky-400";
+            ui.msg.innerText = "";
+            ui.action.classList.remove('hidden');
+
+            if (!isAlive) {
+                ui.deathBanner.classList.remove('hidden');
+                ui.roleContainer.classList.add('hidden');
+                ui.prompt.innerHTML = "<i class='fa-solid fa-ghost mr-2 text-slate-400'></i>Město usíná... Ty vše vidíš seshora.";
+                if (data.all_roles) {
+                    ui.targetList.innerHTML = renderGhostList(data.all_roles);
+                }
+                return;
+            }
+
+            ui.deathBanner.classList.add('hidden');
+            ui.roleContainer.classList.remove('hidden');
+            
+            const rConf = roleConfig[data.role] || roleConfig['Měšťan'];
+            ui.roleDisplay.innerText = data.role;
+            ui.roleDisplay.className = `text-4xl font-black tracking-tight ${rConf.color} ${rConf.bg}`;
+
+            ui.mafiaMates.classList.add('hidden');
+            
+            let villageHTML = "";
+            let targets = data.alive_players.filter(p => p !== myName); 
+            let allTargets = data.alive_players;
+            
+            if (data.role === 'Mafián') {
+                ui.mafiaMates.classList.remove('hidden');
+                ui.mafiaMates.innerHTML = "<i class='fa-solid fa-user-group mr-1'></i>Tým: <span class='text-white font-medium'>" + (data.mafia_mates.filter(m => m !== myName).join(', ') || "Hraješ sám") + "</span>";
+                ui.prompt.innerHTML = "Vyberte cíl útoku:";
+                villageHTML = generateVillage(targets, 'Zabít', 'text-red-500', 'border-red-500/30', 'fa-skull');
+            } else if (data.role === 'Policista') {
+                ui.prompt.innerHTML = "Který dům dnes zamkneš?";
+                villageHTML = generateVillage(targets, 'Hlídka', 'text-blue-400', 'border-blue-500/30', 'fa-ban');
+            } else if (data.role === 'Stopař') {
+                ui.prompt.innerHTML = "Který dům budeš sledovat?";
+                villageHTML = generateVillage(targets, 'Sledovat', 'text-lime-400', 'border-lime-500/30', 'fa-eye');
+            } else if (data.role === 'Pastičkář') {
+                ui.prompt.innerHTML = "Před jaký dům položíš past?";
+                villageHTML = generateVillage(allTargets, 'Past', 'text-orange-400', 'border-orange-500/30', 'fa-spider');
+            } else if (data.role === 'Doktor') {
+                ui.prompt.innerHTML = "U koho budeš dnes hlídat?";
+                villageHTML = generateVillage(allTargets, 'Léčit', 'text-emerald-400', 'border-emerald-500/30', 'fa-syringe');
+            } else if (data.role === 'Detektiv') {
+                ui.prompt.innerHTML = "Který dům prohledáš?";
+                villageHTML = generateVillage(targets, 'Pátrat', 'text-sky-400', 'border-sky-500/30', 'fa-magnifying-glass');
+            } else {
+                ui.prompt.innerHTML = "Jsi obyčejný obyvatel. Spi!";
+                villageHTML = `<button onclick="sendNightAction('')" class="group flex flex-col items-center justify-center bg-slate-900/50 hover:bg-slate-800 border border-slate-700 rounded-2xl py-6 transform hover:-translate-y-1 transition-all w-full mt-2">
+                    <i class="fa-solid fa-bed text-3xl text-slate-500 mb-2 group-hover:text-slate-400"></i>
+                    <span class="font-bold text-slate-300 text-sm uppercase tracking-widest">Jít spát</span>
+                </button>`;
+            }
+            ui.targetList.innerHTML = villageHTML;
+        });
+
+        socket.on('day_phase', data => {
+            isAlive = data.is_alive; 
+            
+            ui.phase.innerText = "Den";
+            ui.phase.className = "text-sm font-bold text-amber-500 tracking-widest uppercase";
+            ui.phaseIcon.className = "fa-solid fa-sun text-amber-500";
+            
+            if (data.dead) {
+                ui.msg.innerHTML = `
+                <div class="bg-gradient-to-br from-slate-800 to-slate-900 p-6 rounded-2xl border-l-4 border-red-500 shadow-md relative overflow-hidden flex flex-col items-center">
+                    <div class="bg-red-500/10 p-4 rounded-full mb-3"><i class="fa-solid fa-skull text-3xl text-red-500"></i></div>
+                    <h3 class="text-xs uppercase tracking-widest text-slate-400 mb-2 font-bold">Zpráva o úmrtí</h3>
+                    <div class="text-center">${data.msg}</div>
+                </div>`;
+            } else {
+                ui.msg.innerHTML = `
+                <div class="bg-gradient-to-br from-slate-800 to-slate-900 p-6 rounded-2xl border-l-4 border-emerald-500 shadow-md flex flex-col items-center">
+                    <div class="bg-emerald-500/10 p-4 rounded-full mb-3"><i class="fa-solid fa-dove text-3xl text-emerald-500"></i></div>
+                    <span class="text-emerald-400 font-bold uppercase tracking-widest text-xs mb-1">Dobré zprávy</span>
+                    <span class="text-slate-200 text-sm font-medium">${data.msg}</span>
+                </div>`;
+            }
+
+            if (!isAlive) {
+                ui.deathBanner.classList.remove('hidden');
+                ui.roleContainer.classList.add('hidden');
+                
+                // Přidáme zobrazení seznamu rolí i přes den
+                ui.action.classList.remove('hidden');
+                ui.prompt.innerHTML = "<i class='fa-solid fa-ghost mr-2 text-slate-400'></i>Město se probudilo. Ty vše vidíš seshora.";
+                if (data.all_roles) {
+                    ui.targetList.innerHTML = renderGhostList(data.all_roles);
+                }
+            }
+
+            if (data.personal_msgs && data.personal_msgs.length > 0) {
+                ui.personalEvents.classList.remove('hidden');
+                
+                ui.personalEventsList.innerHTML = data.personal_msgs.map(m => {
+                    const style = msgColorMap[m.type] || msgColorMap['info'];
+                    return `
+                    <div class="bg-slate-800/80 border-l-4 ${style.border} p-4 rounded-r-2xl shadow-lg flex items-start gap-4 transform hover:scale-[1.01] transition-transform">
+                        <div class="${style.bg} rounded-full flex-shrink-0 w-12 h-12 flex items-center justify-center border border-white/5">
+                            <i class="fa-solid ${m.icon} text-xl ${style.text}"></i>
+                        </div>
+                        <div class="text-left flex-1 pt-0.5">
+                            <h4 class="${style.text} font-black uppercase tracking-widest text-[10px] mb-1">${m.title}</h4>
+                            <p class="text-slate-200 text-sm leading-relaxed font-medium" style="color: #e2e8f0;">${m.text}</p>
+                        </div>
+                    </div>`;
+                }).join('');
+            } else {
+                ui.personalEvents.classList.add('hidden');
+            }
+
+            if (isAlive || isHost) {
+                ui.btnVoting.classList.remove('hidden');
+            } else {
+                ui.btnVoting.classList.add('hidden');
+            }
+        });
+
+        socket.on('voting_started', data => {
+            ui.btnVoting.classList.add('hidden');
+            ui.personalEvents.classList.add('hidden'); 
+            ui.phase.innerText = "Soud";
+            ui.phase.className = "text-sm font-bold text-amber-500 tracking-widest uppercase";
+            ui.phaseIcon.className = "fa-solid fa-gavel text-amber-500";
+            ui.msg.innerText = "";
+            ui.action.classList.remove('hidden');
+            
+            if (!isAlive) {
+                ui.prompt.innerHTML = "<i class='fa-solid fa-ghost mr-2 text-slate-400'></i>Živí hráči teď hlasují na soudu...";
+                // Zachováme list rolí i pro soudní část
+                if (data.all_roles) {
+                    ui.targetList.innerHTML = renderGhostList(data.all_roles);
+                }
+                return; 
+            }
+            
+            ui.prompt.innerHTML = "Koho pošlete na šibenici?";
+            const targets = data.candidates.filter(p => p !== myName);
+            ui.targetList.innerHTML = `<div class="grid grid-cols-2 gap-2 mt-2">` + targets.map((p, i) => `
+                <button style="animation-delay: ${i*0.03}s" onclick="socket.emit('submit_vote', {target: '${p}'}); ui.action.classList.add('hidden'); ui.msg.innerHTML='<div class=\\'bg-amber-900/20 border border-amber-800/50 p-4 rounded-xl text-sm flex items-center justify-center gap-2\\'><i class=\\'fa-solid fa-check text-amber-500\\'></i><span class=\\'text-amber-400\\'>Hlas odevzdán.</span></div>';"
+                    class="group relative flex flex-col items-center justify-center bg-slate-900/50 hover:bg-slate-800 border border-slate-700 hover:border-amber-500/50 rounded-2xl p-3 transform hover:-translate-y-1 transition-all animate-fade-in-up">
+                    <i class="fa-solid fa-user text-3xl mb-1.5 text-slate-600 group-hover:text-amber-500 transition-colors"></i>
+                    <span class="font-bold text-white text-sm z-10 truncate w-full">${p}</span>
+                    <span class="text-[9px] font-bold mt-1 bg-slate-950 px-2 py-1 rounded w-full text-center text-amber-500 z-10 uppercase tracking-widest opacity-80 group-hover:opacity-100">
+                        Hlasovat
+                    </span>
+                </button>
+            `).join('') + `</div>`;
+        });
+
+        socket.on('trial_results', data => {
+            ui.active.classList.add('hidden');
+            ui.trialRes.classList.remove('hidden');
+            document.getElementById('trial-results-text').innerHTML = data.msg;
+
+            if (isHost) {
+                ui.btnNextPhase.classList.remove('hidden');
+                ui.trialWaitMsg.classList.add('hidden');
+            } else {
+                ui.btnNextPhase.classList.add('hidden');
+                ui.trialWaitMsg.classList.remove('hidden');
+            }
+        });
+
+        socket.on('game_over', data => {
+            ui.game.classList.add('hidden');
+            ui.trialRes.classList.add('hidden');
+            ui.gameOver.classList.remove('hidden');
+            document.getElementById('game-over-msg').innerHTML = data.msg;
+            
+            let wColor = "text-sky-400";
+            let wIcon = "fa-users";
+            if(data.winner === 'Mafie') { wColor = "text-red-500"; wIcon = "fa-user-secret"; }
+            else if(data.winner === 'Šašek') { wColor = "text-amber-400"; wIcon = "fa-masks-theater"; }
+            
+            document.getElementById('winner-display').innerHTML = `<div class="bg-slate-900/50 p-4 rounded-full inline-block mb-4 border border-slate-700"><i class="fa-solid ${wIcon} text-4xl ${wColor}"></i></div><div class="text-xs uppercase tracking-widest text-slate-400 mb-1 font-bold">VÍTĚZ HRY</div><div class="text-3xl font-black uppercase ${wColor}">${data.winner}</div>`;
+        });
+    </script>
+</body>
+</html>
