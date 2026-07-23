@@ -117,8 +117,7 @@ def handle_start(data):
         'doc': data.get('doc', '0'),
         'det': data.get('det', '0'),
         'jester': data.get('jester', '0'),
-        'insane': data.get('insane', '0'),
-        'mayor': data.get('mayor', '0')
+        'insane': data.get('insane', '0')
     }
 
     max_limits = {
@@ -129,8 +128,7 @@ def handle_start(data):
         'doc': 2,
         'det': max(1, total_players // 4),
         'jester': 1,
-        'insane': 2,
-        'mayor': 1
+        'insane': 2
     }
 
     assigned_counts = {}
@@ -173,8 +171,7 @@ def handle_start(data):
         ["Doktor"] * assigned_counts['doc'] + 
         ["Detektiv"] * assigned_counts['det'] + 
         ["Šašek"] * assigned_counts['jester'] + 
-        ["Blázen"] * assigned_counts['insane'] + 
-        ["Starosta"] * assigned_counts['mayor']
+        ["Blázen"] * assigned_counts['insane']
     )
     
     while len(roles_to_assign) < total_players:
@@ -394,7 +391,12 @@ def handle_submit_vote(data):
     sid = request.sid
     if sid not in game_state["players"] or not game_state["players"][sid]["alive"]: return
     
-    game_state["votes"][sid] = data.get('target')
+    # Zabezpečení proti kliknutí na sebe (kdyby se o to někdo pokusil)
+    target = data.get('target')
+    voter_name = game_state["players"][sid]["name"]
+    if target == voter_name: return
+    
+    game_state["votes"][sid] = target
     alive_sids = [s for s, p in game_state["players"].items() if p["alive"]]
     
     if len(game_state["votes"]) >= len(alive_sids): evaluate_votes()
@@ -404,11 +406,9 @@ def evaluate_votes():
     
     for sid, target in game_state["votes"].items():
         voter_name = game_state["players"][sid]["name"]
-        is_mayor = game_state["players"][sid]["actual_role"] == "Starosta"
-        points = 2 if is_mayor else 1
         
-        vote_points[target] = vote_points.get(target, 0) + points
-        vote_details.setdefault(target, []).append(f"{voter_name} (x2)" if is_mayor else voter_name)
+        vote_points[target] = vote_points.get(target, 0) + 1
+        vote_details.setdefault(target, []).append(voter_name)
 
     eliminated = max(vote_points, key=vote_points.get)
     res_str = f"<div class='text-2xl font-black text-white mb-2'>Oběšen byl(a): <span class='text-red-500'>{eliminated}</span></div>"
