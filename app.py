@@ -39,7 +39,9 @@ def handle_disconnect():
     sid = request.sid
     if sid in game_state["players"]:
         del game_state["players"][sid]
-        
+        game_state["night_actions"].pop(sid, None)
+        game_state["votes"].pop(sid, None)
+
         if len(game_state["players"]) == 0:
             game_state["phase"] = "Lobby"
             game_state["host_sid"] = None
@@ -51,8 +53,20 @@ def handle_disconnect():
                 game_state["host_sid"] = alive_sids[0] if alive_sids else None
                 if game_state["host_sid"]:
                     emit('host_status', {'is_host': True}, to=game_state["host_sid"])
-                    
+
         emit('update_players', get_player_info(), broadcast=True)
+
+        if len(game_state["players"]) > 0 and game_state["phase"] not in ("Lobby",):
+            winner, default_msg = get_winner()
+            if winner:
+                emit('game_over', {'winner': winner, 'msg': default_msg}, broadcast=True)
+                game_state["phase"] = "Lobby"
+            elif game_state["phase"] == "Noc":
+                check_night_end()
+            elif game_state["phase"] == "Hlasování":
+                alive_sids = [s for s, p in game_state["players"].items() if p["alive"]]
+                if alive_sids and len(game_state["votes"]) >= len(alive_sids):
+                    evaluate_votes()
 
 @socketio.on('join_game')
 def handle_join(data):
@@ -244,7 +258,9 @@ def check_night_end():
     
     actions = {}
     for sid, target in game_state["night_actions"].items():
-        player = game_state["players"][sid]
+        player = game_state["players"].get(sid)
+        if not player:
+            continue
         actions[sid] = {
             "name": player["name"], "role": player["actual_role"], "perc_role": player["perceived_role"],
             "target": target, "blocked": False, "trapped": False
@@ -309,7 +325,8 @@ def check_night_end():
         if act["blocked"] or act["trapped"] or not act["target"]: continue
         if act["role"] == "Doktor": healed_names.add(act["target"])
         elif act["role"] == "Detektiv":
-            tgt_real = next(p["actual_role"] for p in game_state["players"].values() if p["name"] == act["target"])
+            tgt_real = next((p["actual_role"] for p in game_state["players"].values() if p["name"] == act["target"]), None)
+            if tgt_real is None: continue
             shown = [tgt_real, random.choice([r for r in ALL_ROLES if r != tgt_real])]
             random.shuffle(shown)
             add_msg(sid, 'success', 'fa-magnifying-glass', 'Stopy', f'<b>{act["target"]}</b> je <b>{shown[0]}</b> NEBO <b>{shown[1]}</b>!')
@@ -372,7 +389,8 @@ def check_night_end():
 
     dead_msg_list = []
     for name in actual_deaths:
-        p = next(p for p in game_state["players"].values() if p["name"] == name)
+        p = next((p for p in game_state["players"].values() if p["name"] == name), None)
+        if p is None: continue
         r_str = f" <span class='text-slate-400 font-normal italic'>(Byl to: {p['actual_role']})</span>" if game_state["settings"]["reveal_roles"] else ""
         dead_msg_list.append(f"<div class='text-xl font-bold text-white'>{name}{r_str}</div>")
 
@@ -417,11 +435,17 @@ def handle_submit_vote(data):
 
 def evaluate_votes():
     vote_points, vote_details = {}, {}
-    
+
     for sid, target in game_state["votes"].items():
-        voter_name = game_state["players"][sid]["name"]
+        player = game_state["players"].get(sid)
+        if not player:
+            continue
+        voter_name = player["name"]
         vote_points[target] = vote_points.get(target, 0) + 1
         vote_details.setdefault(target, []).append(voter_name)
+
+    if not vote_points:
+        return
 
     eliminated = max(vote_points, key=vote_points.get)
     
@@ -456,19 +480,24 @@ def evaluate_votes():
 
     check_win_condition(is_night=False, custom_msg=res_str)
 
-def check_win_condition(is_night=False, custom_msg=""):
+def get_winner():
     alive_mafia = sum(1 for p in game_state["players"].values() if p["actual_role"] == "Mafián" and p["alive"])
     alive_town = sum(1 for p in game_state["players"].values() if p["actual_role"] != "Mafián" and p["alive"])
-    
+
     if alive_mafia == 0:
-        emit('game_over', {'winner': 'Měšťané', 'msg': custom_msg or "Všichni zloduchové jsou mrtví!"}, broadcast=True)
+        return 'Měšťané', "Všichni zloduchové jsou mrtví!"
+    if alive_mafia >= alive_town:
+        return 'Mafie', "Mafie přečíslila město a ovládla ho!"
+    return None, None
+
+def check_win_condition(is_night=False, custom_msg=""):
+    winner, default_msg = get_winner()
+
+    if winner:
+        emit('game_over', {'winner': winner, 'msg': custom_msg or default_msg}, broadcast=True)
         game_state["phase"] = "Lobby"
         return True
-    elif alive_mafia >= alive_town:
-        emit('game_over', {'winner': 'Mafie', 'msg': custom_msg or "Mafie přečíslila město a ovládla ho!"}, broadcast=True)
-        game_state["phase"] = "Lobby"
-        return True
-        
+
     if not is_night: emit('trial_results', {'msg': custom_msg}, broadcast=True)
     return False
 
