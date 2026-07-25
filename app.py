@@ -34,39 +34,50 @@ def index():
 def handle_connect():
     emit('update_players', get_player_info())
 
+def remove_player(sid):
+    """Remove a player and keep night_actions/votes/host in sync. Returns True if removed."""
+    if sid not in game_state["players"]:
+        return False
+
+    del game_state["players"][sid]
+    game_state["night_actions"].pop(sid, None)
+    game_state["votes"].pop(sid, None)
+
+    if len(game_state["players"]) == 0:
+        game_state["phase"] = "Lobby"
+        game_state["host_sid"] = None
+        game_state["votes"] = {}
+        game_state["night_actions"] = {}
+    elif game_state["host_sid"] == sid:
+        alive_sids = list(game_state["players"].keys())
+        game_state["host_sid"] = alive_sids[0] if alive_sids else None
+        if game_state["host_sid"]:
+            emit('host_status', {'is_host': True}, to=game_state["host_sid"])
+
+    return True
+
+def resolve_round_after_removal():
+    """Re-evaluate the current round after a player left, so the game never hangs waiting on them."""
+    if len(game_state["players"]) == 0 or game_state["phase"] == "Lobby":
+        return
+
+    winner, default_msg = get_winner()
+    if winner:
+        emit('game_over', {'winner': winner, 'msg': default_msg}, broadcast=True)
+        game_state["phase"] = "Lobby"
+    elif game_state["phase"] == "Noc":
+        check_night_end()
+    elif game_state["phase"] == "Hlasování":
+        alive_sids = [s for s, p in game_state["players"].items() if p["alive"]]
+        if alive_sids and len(game_state["votes"]) >= len(alive_sids):
+            evaluate_votes()
+
 @socketio.on('disconnect')
 def handle_disconnect():
     sid = request.sid
-    if sid in game_state["players"]:
-        del game_state["players"][sid]
-        game_state["night_actions"].pop(sid, None)
-        game_state["votes"].pop(sid, None)
-
-        if len(game_state["players"]) == 0:
-            game_state["phase"] = "Lobby"
-            game_state["host_sid"] = None
-            game_state["votes"] = {}
-            game_state["night_actions"] = {}
-        else:
-            if game_state["host_sid"] == sid:
-                alive_sids = list(game_state["players"].keys())
-                game_state["host_sid"] = alive_sids[0] if alive_sids else None
-                if game_state["host_sid"]:
-                    emit('host_status', {'is_host': True}, to=game_state["host_sid"])
-
+    if remove_player(sid):
         emit('update_players', get_player_info(), broadcast=True)
-
-        if len(game_state["players"]) > 0 and game_state["phase"] not in ("Lobby",):
-            winner, default_msg = get_winner()
-            if winner:
-                emit('game_over', {'winner': winner, 'msg': default_msg}, broadcast=True)
-                game_state["phase"] = "Lobby"
-            elif game_state["phase"] == "Noc":
-                check_night_end()
-            elif game_state["phase"] == "Hlasování":
-                alive_sids = [s for s, p in game_state["players"].items() if p["alive"]]
-                if alive_sids and len(game_state["votes"]) >= len(alive_sids):
-                    evaluate_votes()
+        resolve_round_after_removal()
 
 @socketio.on('join_game')
 def handle_join(data):
@@ -116,15 +127,10 @@ def handle_kick(data):
             break
             
     if target_sid:
-        del game_state["players"][target_sid]
         emit('kicked', {'msg': 'Byl jsi vyhozen z Lobby administrátorem.'}, to=target_sid)
+        remove_player(target_sid)
         emit('update_players', get_player_info(), broadcast=True)
-
-        if target_sid == game_state["host_sid"]:
-            alive_sids = list(game_state["players"].keys())
-            game_state["host_sid"] = alive_sids[0] if alive_sids else None
-            if game_state["host_sid"]:
-                emit('host_status', {'is_host': True}, to=game_state["host_sid"])
+        resolve_round_after_removal()
 
 @socketio.on('start_game')
 def handle_start(data):
@@ -135,7 +141,11 @@ def handle_start(data):
     game_state["night_actions"] = {}
     
     total_players = len(game_state["players"])
-    
+
+    if total_players < 3:
+        emit('error_msg', 'Pro odstartování hry jsou potřeba aspoň 3 hráči!', to=request.sid)
+        return
+
     settings = {
         'mafia': data.get('mafia', '1'),
         'pol': data.get('pol', '0'),
@@ -168,7 +178,10 @@ def handle_start(data):
             random_roles.append(role_key)
             fixed_sum += 1
         else:
-            c = int(val)
+            try:
+                c = max(0, int(val))
+            except (TypeError, ValueError):
+                c = 0
             assigned_counts[role_key] = c
             fixed_sum += c
 
@@ -255,7 +268,9 @@ def handle_night_action(data):
 def check_night_end():
     alive_sids = [s for s, p in game_state["players"].items() if p["alive"]]
     if len(game_state["night_actions"]) < len(alive_sids): return
-    
+
+    alive_names = [game_state["players"][s]["name"] for s in alive_sids]
+
     actions = {}
     for sid, target in game_state["night_actions"].items():
         player = game_state["players"].get(sid)
@@ -366,10 +381,10 @@ def check_night_end():
                 shown = random.sample(ALL_ROLES, 2)
                 add_msg(sid, 'success', 'fa-magnifying-glass', 'Stopy', f'<b>{act["target"]}</b> je <b>{shown[0]}</b> NEBO <b>{shown[1]}</b>!')
             elif pr == "Stopař":
-                if random.choice([True, False]): add_msg(sid, 'success', 'fa-shoe-prints', 'Stopy!', f'<b>{act["target"]}</b> navštívil: <b>{random.choice(alive_sids)}</b>.')
+                if random.choice([True, False]): add_msg(sid, 'success', 'fa-shoe-prints', 'Stopy!', f'<b>{act["target"]}</b> navštívil: <b>{random.choice(alive_names)}</b>.')
                 else: add_msg(sid, 'info', 'fa-shoe-prints', 'Čistá stopa', f'<b>{act["target"]}</b> zůstal doma.')
             elif pr == "Pastičkář":
-                if random.choice([True, False]): add_msg(sid, 'success', 'fa-spider', 'Past sklapla!', f'Někdo se v noci chytil do tvé pasti! Byl to: <b>{random.choice(alive_sids)}</b>')
+                if random.choice([True, False]): add_msg(sid, 'success', 'fa-spider', 'Past sklapla!', f'Někdo se v noci chytil do tvé pasti! Byl to: <b>{random.choice(alive_names)}</b>')
                 else: add_msg(sid, 'info', 'fa-spider', 'Klidná past', f'Do tvé pasti u hráče <b>{act["target"]}</b> nikdo nešlápl.')
             elif pr == "Policista":
                 if random.choice([True, False]): add_msg(sid, 'success', 'fa-user-lock', 'Úspěšný zásah!', f'Úspěšně jsi zablokoval hráče <b>{act["target"]}</b>!')
@@ -407,6 +422,7 @@ def check_night_end():
 @socketio.on('start_voting')
 def handle_start_voting():
     if game_state["phase"] != "Den": return
+    if request.sid != game_state["host_sid"]: return
     game_state["phase"] = "Hlasování"
     game_state["votes"] = {}
     
