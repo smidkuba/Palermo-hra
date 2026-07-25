@@ -1,10 +1,19 @@
-from flask import Flask, render_template, request
-from flask_socketio import SocketIO, emit
+import eventlet
+eventlet.monkey_patch()
+
+import os
+import re
 import random
 
+from flask import Flask, render_template, request
+from flask_socketio import SocketIO, emit
+
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'super-tajne-palermo-heslo'
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'super-tajne-palermo-heslo')
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
+
+NAME_PATTERN = re.compile(r'^[^\s<>"\'&/\\]+(?: [^\s<>"\'&/\\]+)*$', re.UNICODE)
+MAX_NAME_LENGTH = 15
 
 game_state = {
     "players": {},
@@ -48,10 +57,14 @@ def handle_disconnect():
 @socketio.on('join_game')
 def handle_join(data):
     name = data.get('name', '').strip()
-    if not name: 
+    if not name:
         emit('error_msg', 'Jméno nesmí být prázdné!', to=request.sid)
         return
-    
+
+    if len(name) > MAX_NAME_LENGTH or not NAME_PATTERN.match(name):
+        emit('error_msg', f'Jméno smí mít max. {MAX_NAME_LENGTH} znaků a nesmí obsahovat speciální znaky (< > " \' & /).', to=request.sid)
+        return
+
     if game_state["phase"] != "Lobby":
         emit('error_msg', 'Hra už probíhá! Musíš počkat, až skončí.', to=request.sid)
         return
@@ -463,4 +476,6 @@ def get_player_info():
     return [{"name": p["name"], "is_host": (sid == game_state["host_sid"])} for sid, p in game_state["players"].items()]
 
 if __name__ == '__main__':
-    socketio.run(app, debug=True, host='0.0.0.0', port=5000)
+    debug_mode = os.environ.get('FLASK_DEBUG', '0') == '1'
+    port = int(os.environ.get('PORT', 5000))
+    socketio.run(app, debug=debug_mode, host='0.0.0.0', port=port)

@@ -114,6 +114,12 @@
         let myName = "";
         let isHost = false;
 
+        function escapeHtml(str) {
+            return String(str).replace(/[&<>"']/g, c => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+            }[c]));
+        }
+
         // --- NÁPOVĚDA A PRAVIDLA ---
         function showHelp() {
             Swal.fire({
@@ -253,16 +259,17 @@
             
             playersInfo.forEach(p => {
                 const isMe = p.name === myName;
+                const safeName = escapeHtml(p.name);
                 const hostBadge = p.is_host ? `<i class="fa-solid fa-crown text-amber-400 ml-2 text-sm" title="Hostitel"></i>` : '';
                 const meBadge = isMe ? `<span class="ml-2 text-xs bg-slate-700 px-2 py-0.5 rounded-full text-slate-300">Ty</span>` : '';
-                const kickBtn = (isHost && !isMe) ? `<button onclick="kickPlayer('${p.name}')" class="text-rose-500 hover:text-rose-400 transition ml-auto" title="Vyhodit hráče"><i class="fa-solid fa-circle-xmark text-lg"></i></button>` : '';
+                const kickBtn = (isHost && !isMe) ? `<button onclick="kickPlayer('${safeName}')" class="text-rose-500 hover:text-rose-400 transition ml-auto" title="Vyhodit hráče"><i class="fa-solid fa-circle-xmark text-lg"></i></button>` : '';
 
                 list.innerHTML += `
                     <li class="flex items-center bg-slate-800/60 p-3 rounded-xl border border-slate-700/50">
                         <div class="w-8 h-8 rounded-full bg-gradient-to-br ${p.is_host ? 'from-amber-400 to-orange-600' : 'from-slate-600 to-slate-800'} flex items-center justify-center mr-3 shadow-inner">
                             <i class="fa-solid fa-user text-white text-xs"></i>
                         </div>
-                        <span class="font-bold text-slate-200 text-lg">${p.name}</span>
+                        <span class="font-bold text-slate-200 text-lg">${safeName}</span>
                         ${hostBadge} ${meBadge} ${kickBtn}
                     </li>`;
             });
@@ -319,7 +326,7 @@
             const matesEl = document.getElementById('mafia-mates');
             if(data.role === "Mafián") {
                 if(data.mafia_mates.length > 0) {
-                    matesEl.innerHTML = `<i class="fa-solid fa-users text-rose-500"></i> Spoluhráči mafie: <span class="text-white">${data.mafia_mates.join(', ')}</span>`;
+                    matesEl.innerHTML = `<i class="fa-solid fa-users text-rose-500"></i> Spoluhráči mafie: <span class="text-white">${data.mafia_mates.map(escapeHtml).join(', ')}</span>`;
                 } else {
                     matesEl.innerHTML = `<i class="fa-solid fa-user-ninja text-rose-500"></i> Jsi jediný Mafián (hraješ sám)`;
                 }
@@ -341,14 +348,15 @@
                 html += `<div class="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-6">`;
                 data.alive_players.forEach(p => {
                     if (p !== myName || data.role === "Doktor" || data.role === "Pastičkář") {
+                        const safeName = escapeHtml(p);
                         html += `
-                        <div onclick="sendNightAction('${p}')" class="cursor-pointer bg-slate-800 hover:bg-indigo-700 border border-slate-700 hover:border-indigo-400 rounded-2xl p-4 flex flex-col items-center justify-center transition-all shadow-lg transform hover:-translate-y-1 group">
+                        <div onclick="sendNightAction('${safeName}')" class="cursor-pointer bg-slate-800 hover:bg-indigo-700 border border-slate-700 hover:border-indigo-400 rounded-2xl p-4 flex flex-col items-center justify-center transition-all shadow-lg transform hover:-translate-y-1 group">
                             <div class="relative mb-2 mt-1">
                                 <i class="fa-solid fa-house-chimney text-4xl text-slate-500 group-hover:text-indigo-200 transition-colors"></i>
                                 <!-- Efekt rozsvíceného okénka při najetí myší -->
                                 <div class="absolute -bottom-1 -right-1 w-3 h-3 bg-yellow-400 rounded-sm opacity-0 group-hover:opacity-100 transition-opacity shadow-[0_0_10px_rgba(250,204,21,0.8)]"></div>
                             </div>
-                            <span class="font-bold text-slate-300 group-hover:text-white text-center break-words w-full text-sm">${p}</span>
+                            <span class="font-bold text-slate-300 group-hover:text-white text-center break-words w-full text-sm">${safeName}</span>
                         </div>`;
                     }
                 });
@@ -425,11 +433,12 @@
             html += `<div class="grid grid-cols-2 gap-4 mb-6">`;
             data.candidates.forEach(c => {
                 if (c !== myName) {
+                    const safeName = escapeHtml(c);
                     html += `
-                    <button onclick="submitVote('${c}')" class="relative overflow-hidden group bg-slate-800 hover:bg-orange-600 border border-slate-700 hover:border-orange-400 text-white font-bold py-4 px-4 rounded-2xl transition-all shadow-lg transform hover:-translate-y-1">
+                    <button onclick="submitVote('${safeName}')" class="relative overflow-hidden group bg-slate-800 hover:bg-orange-600 border border-slate-700 hover:border-orange-400 text-white font-bold py-4 px-4 rounded-2xl transition-all shadow-lg transform hover:-translate-y-1">
                         <div class="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
                         <i class="fa-solid fa-user-xmark text-2xl mb-2 text-slate-500 group-hover:text-white transition-colors"></i><br>
-                        <span class="relative z-10">${c}</span>
+                        <span class="relative z-10">${safeName}</span>
                     </button>`;
                 }
             });
