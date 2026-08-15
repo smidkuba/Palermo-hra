@@ -111,8 +111,15 @@
 
     <script>
         const socket = io();
-        let myName = "";
+        let myName = sessionStorage.getItem('palermoPlayerName') || "";
         let isHost = false;
+
+        // Pokud se prohlížeč odpojil (zhasl displej) a znovu se připojuje
+        socket.on('connect', () => {
+            if (myName !== "") {
+                socket.emit('reconnect_player', {name: myName});
+            }
+        });
 
         function escapeHtml(str) {
             return String(str).replace(/[&<>"']/g, c => ({
@@ -179,7 +186,7 @@
                 `,
                 background: '#1e293b',
                 color: '#fff',
-                confirmButtonColor: '#0ea5e9', // Sky-500
+                confirmButtonColor: '#0ea5e9',
                 confirmButtonText: '<i class="fa-solid fa-check mr-2"></i> Rozumím',
                 customClass: { popup: 'rounded-2xl border border-slate-700' },
                 width: '600px'
@@ -232,11 +239,12 @@
         }
 
         socket.on('error_msg', function(msg) {
-            Swal.fire({ icon: 'error', title: 'Nelze se připojit', text: msg, background: '#1e293b', color: '#fff', confirmButtonColor: '#e11d48' });
+            Swal.fire({ icon: 'error', title: 'Chyba', text: msg, background: '#1e293b', color: '#fff', confirmButtonColor: '#e11d48' });
         });
 
         socket.on('join_success', function(data) {
             myName = data.name;
+            sessionStorage.setItem('palermoPlayerName', myName); // Uložíme do paměti prohlížeče proti refreshům
             document.getElementById('login-screen').classList.add('hide');
             document.getElementById('lobby-screen').classList.remove('hide');
         });
@@ -262,17 +270,26 @@
                 const safeName = escapeHtml(p.name);
                 const hostBadge = p.is_host ? `<i class="fa-solid fa-crown text-amber-400 ml-2 text-sm" title="Hostitel"></i>` : '';
                 const meBadge = isMe ? `<span class="ml-2 text-xs bg-slate-700 px-2 py-0.5 rounded-full text-slate-300">Ty</span>` : '';
+                
+                // Přidán ukazatel, pokud hráč ztratil připojení
+                const connBadge = p.connected ? '' : `<span class="ml-2 text-xs font-bold text-rose-400 bg-rose-900/30 px-2 py-0.5 rounded-full border border-rose-500/50"><i class="fa-solid fa-wifi mr-1"></i>Odpojen</span>`;
                 const kickBtn = (isHost && !isMe) ? `<button onclick="kickPlayer('${safeName}')" class="text-rose-500 hover:text-rose-400 transition ml-auto" title="Vyhodit hráče"><i class="fa-solid fa-circle-xmark text-lg"></i></button>` : '';
 
                 list.innerHTML += `
-                    <li class="flex items-center bg-slate-800/60 p-3 rounded-xl border border-slate-700/50">
+                    <li class="flex items-center bg-slate-800/60 p-3 rounded-xl border border-slate-700/50 ${!p.connected ? 'opacity-60' : ''}">
                         <div class="w-8 h-8 rounded-full bg-gradient-to-br ${p.is_host ? 'from-amber-400 to-orange-600' : 'from-slate-600 to-slate-800'} flex items-center justify-center mr-3 shadow-inner">
-                            <i class="fa-solid fa-user text-white text-xs"></i>
+                            <i class="fa-solid ${p.connected ? 'fa-user text-white' : 'fa-user-slash text-slate-400'} text-xs"></i>
                         </div>
                         <span class="font-bold text-slate-200 text-lg">${safeName}</span>
-                        ${hostBadge} ${meBadge} ${kickBtn}
+                        ${hostBadge} ${meBadge} ${connBadge} ${kickBtn}
                     </li>`;
             });
+            
+            // Pokud jsi připojen automaticky přes paměť, ale nevidíš login, přepni lobby
+            if(myName !== "" && document.getElementById('login-screen').classList.contains('hide') === false) {
+                document.getElementById('login-screen').classList.add('hide');
+                document.getElementById('lobby-screen').classList.remove('hide');
+            }
         });
 
         function kickPlayer(name) {
@@ -292,6 +309,7 @@
         }
 
         socket.on('kicked', function(data) {
+            sessionStorage.removeItem('palermoPlayerName');
             Swal.fire({
                 title: 'Vyhozen!', text: data.msg, icon: 'error',
                 background: '#1e293b', color: '#fff', confirmButtonColor: '#3b82f6',
@@ -344,7 +362,6 @@
             if (data.phase === "Noc") {
                 let html = `<h3 class="text-xl font-bold text-slate-200 mb-6 text-center"><i class="fa-solid fa-moon text-indigo-400 mr-2"></i>Vyber dům, který v noci navštívíš:</h3>`;
                 
-                // VIZUÁLNÍ BARÁČKY (Grid mřížka domů)
                 html += `<div class="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-6">`;
                 data.alive_players.forEach(p => {
                     if (p !== myName || data.role === "Doktor" || data.role === "Pastičkář") {
@@ -353,7 +370,6 @@
                         <div onclick="sendNightAction('${safeName}')" class="cursor-pointer bg-slate-800 hover:bg-indigo-700 border border-slate-700 hover:border-indigo-400 rounded-2xl p-4 flex flex-col items-center justify-center transition-all shadow-lg transform hover:-translate-y-1 group">
                             <div class="relative mb-2 mt-1">
                                 <i class="fa-solid fa-house-chimney text-4xl text-slate-500 group-hover:text-indigo-200 transition-colors"></i>
-                                <!-- Efekt rozsvíceného okénka při najetí myší -->
                                 <div class="absolute -bottom-1 -right-1 w-3 h-3 bg-yellow-400 rounded-sm opacity-0 group-hover:opacity-100 transition-opacity shadow-[0_0_10px_rgba(250,204,21,0.8)]"></div>
                             </div>
                             <span class="font-bold text-slate-300 group-hover:text-white text-center break-words w-full text-sm">${safeName}</span>
@@ -362,7 +378,6 @@
                 });
                 html += `</div>`;
 
-                // Volba nic nedělání dole
                 if (data.role === "Měšťan" || data.role === "Šašek") {
                     html += `<button onclick="sendNightAction('')" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-4 rounded-xl shadow-lg mt-2"><i class="fa-solid fa-bed mr-2"></i> Jít spát (Nemáš noční akci)</button>`;
                 } else {
@@ -429,7 +444,6 @@
 
             let html = `<h3 class="text-xl font-bold text-slate-200 mb-6 text-center"><i class="fa-solid fa-scale-balanced text-orange-400 mr-2"></i>Vyber, koho pošleš na oprátku:</h3>`;
             
-            // Vizuálně vylepšená tlačítka hráčů
             html += `<div class="grid grid-cols-2 gap-4 mb-6">`;
             data.candidates.forEach(c => {
                 if (c !== myName) {
@@ -444,7 +458,6 @@
             });
             html += `</div>`;
 
-            // Tlačítko pro přeskočení hlasování (zvýrazněno jinak)
             html += `
                 <button onclick="submitVote('__SKIP__')" class="w-full bg-slate-700 hover:bg-slate-600 text-slate-300 font-bold py-4 rounded-xl shadow-lg border border-slate-600 hover:border-slate-400 transition-all transform hover:-translate-y-1">
                     <i class="fa-solid fa-person-walking-arrow-right text-xl mr-2"></i> Nezabíjet nikoho (Přeskočit)
@@ -483,6 +496,7 @@
         function proceedToNight() { socket.emit('proceed_to_night'); }
 
         socket.on('game_over', function(data) {
+            sessionStorage.removeItem('palermoPlayerName'); // Na konci hry promažeme paměť prohlížeče
             Swal.fire({
                 title: data.winner === 'Mafie' ? 'Mafie vítězí!' : data.winner === 'Šašek' ? 'Šašek vyhrál!' : 'Město vítězí!',
                 html: data.msg,
