@@ -34,8 +34,90 @@ def index():
 def handle_connect():
     emit('update_players', get_player_info())
 
+@socketio.on('reconnect_player')
+def handle_reconnect(data):
+    name = data.get('name')
+    new_sid = request.sid
+
+    for old_sid, p in list(game_state["players"].items()):
+        if p["name"] == name:
+            # Převedeme všechna stará data pod nové spojení
+            if old_sid != new_sid:
+                p["connected"] = True
+                game_state["players"][new_sid] = p
+                del game_state["players"][old_sid]
+
+                if game_state["host_sid"] == old_sid:
+                    game_state["host_sid"] = new_sid
+
+                if old_sid in game_state["votes"]:
+                    game_state["votes"][new_sid] = game_state["votes"].pop(old_sid)
+                if old_sid in game_state["night_actions"]:
+                    game_state["night_actions"][new_sid] = game_state["night_actions"].pop(old_sid)
+
+            # Pošleme klientovi aktuální stav, aby mu nezamrzla obrazovka
+            resend_state_to_player(new_sid)
+            emit('update_players', get_player_info(), broadcast=True)
+            
+            # Zkontrolujeme, jestli jeho návrat něco neovlivnil
+            resolve_round_after_removal()
+            return
+
+def resend_state_to_player(sid):
+    p = game_state["players"].get(sid)
+    if not p: return
+    phase = game_state["phase"]
+
+    emit('join_success', {'name': p["name"]}, to=sid)
+    emit('host_status', {'is_host': (game_state["host_sid"] == sid)}, to=sid)
+
+    if phase == "Noc":
+        alive_players = [p2["name"] for p2 in game_state["players"].values() if p2["alive"]]
+        mafia_names = [p2["name"] for p2 in game_state["players"].values() if p2["actual_role"] == "Mafián" and p2["alive"]]
+        mates = [m for m in mafia_names if m != p["name"]] if p["actual_role"] == "Mafián" else []
+        all_roles = [{"name": p2["name"], "role": p2["actual_role"], "alive": p2["alive"]} for p2 in game_state["players"].values()]
+
+        payload = {
+            "role": p["perceived_role"],
+            "phase": phase,
+            "alive": p["alive"],
+            "alive_players": alive_players,
+            "mafia_mates": mates
+        }
+        if not p["alive"]: payload["all_roles"] = all_roles
+        emit('game_started', payload, to=sid)
+        
+    elif phase == "Den":
+        all_roles = [{"name": p2["name"], "role": p2["actual_role"], "alive": p2["alive"]} for p2 in game_state["players"].values()]
+        payload = {'msg': "Znovu ses připojil! Obrazovka je synchronizována.", 'dead': False, 'personal_msgs': [], 'is_alive': p["alive"]}
+        if not p["alive"]: payload["all_roles"] = all_roles
+        emit('day_phase', payload, to=sid)
+        
+    elif phase == "Hlasování":
+        alive_players = [p2["name"] for p2 in game_state["players"].values() if p2["alive"]]
+        all_roles = [{"name": p2["name"], "role": p2["actual_role"], "alive": p2["alive"]} for p2 in game_state["players"].values()]
+        payload = {'candidates': alive_players}
+        if not p["alive"]: payload["all_roles"] = all_roles
+        emit('voting_started', payload, to=sid)
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    sid = request.sid
+    if sid in game_state["players"]:
+        game_state["players"][sid]["connected"] = False
+        
+        # Pokud se odpojil Host, předáme korunu prvnímu živému spojení
+        if game_state["host_sid"] == sid:
+            connected_sids = [s for s, p in game_state["players"].items() if p.get("connected", True) and s != sid]
+            if connected_sids:
+                game_state["host_sid"] = connected_sids[0]
+                emit('host_status', {'is_host': True}, to=game_state["host_sid"])
+        
+        emit('update_players', get_player_info(), broadcast=True)
+        # Hned zjistíme, jestli hra nečekala už jen na něj
+        resolve_round_after_removal()
+
 def remove_player(sid):
-    """Remove a player and keep night_actions/votes/host in sync. Returns True if removed."""
     if sid not in game_state["players"]:
         return False
 
@@ -49,15 +131,14 @@ def remove_player(sid):
         game_state["votes"] = {}
         game_state["night_actions"] = {}
     elif game_state["host_sid"] == sid:
-        alive_sids = list(game_state["players"].keys())
-        game_state["host_sid"] = alive_sids[0] if alive_sids else None
+        connected_sids = [s for s, p in game_state["players"].items() if p.get("connected", True)]
+        game_state["host_sid"] = connected_sids[0] if connected_sids else None
         if game_state["host_sid"]:
             emit('host_status', {'is_host': True}, to=game_state["host_sid"])
 
     return True
 
 def resolve_round_after_removal():
-    """Re-evaluate the current round after a player left, so the game never hangs waiting on them."""
     if len(game_state["players"]) == 0 or game_state["phase"] == "Lobby":
         return
 
@@ -68,16 +149,7 @@ def resolve_round_after_removal():
     elif game_state["phase"] == "Noc":
         check_night_end()
     elif game_state["phase"] == "Hlasování":
-        alive_sids = [s for s, p in game_state["players"].items() if p["alive"]]
-        if alive_sids and len(game_state["votes"]) >= len(alive_sids):
-            evaluate_votes()
-
-@socketio.on('disconnect')
-def handle_disconnect():
-    sid = request.sid
-    if remove_player(sid):
-        emit('update_players', get_player_info(), broadcast=True)
-        resolve_round_after_removal()
+        evaluate_votes_if_ready()
 
 @socketio.on('join_game')
 def handle_join(data):
@@ -87,7 +159,7 @@ def handle_join(data):
         return
 
     if len(name) > MAX_NAME_LENGTH or not NAME_PATTERN.match(name):
-        emit('error_msg', f'Jméno smí mít max. {MAX_NAME_LENGTH} znaků a nesmí obsahovat speciální znaky (< > " \' & /).', to=request.sid)
+        emit('error_msg', f'Jméno smí mít max. {MAX_NAME_LENGTH} znaků a nesmí obsahovat speciální znaky.', to=request.sid)
         return
 
     if game_state["phase"] != "Lobby":
@@ -104,7 +176,8 @@ def handle_join(data):
         "name": name,
         "actual_role": "Měšťan",
         "perceived_role": "Měšťan",
-        "alive": True
+        "alive": True,
+        "connected": True
     }
     
     if not game_state["host_sid"]:
@@ -248,7 +321,8 @@ def start_night():
             "mafia_mates": mates
         }
         if not player["alive"]: payload["all_roles"] = all_roles_payload
-        emit('game_started', payload, to=sid)
+        if player.get("connected", True):
+            emit('game_started', payload, to=sid)
 
 @socketio.on('proceed_to_night')
 def handle_proceed_to_night():
@@ -267,15 +341,19 @@ def handle_night_action(data):
 
 def check_night_end():
     alive_sids = [s for s, p in game_state["players"].items() if p["alive"]]
-    if len(game_state["night_actions"]) < len(alive_sids): return
+    connected_alive_sids = [s for s in alive_sids if game_state["players"][s].get("connected", True)]
+    
+    if not connected_alive_sids: return
+    
+    actions_submitted = [s for s in game_state["night_actions"] if s in connected_alive_sids]
+    if len(actions_submitted) < len(connected_alive_sids): return
 
     alive_names = [game_state["players"][s]["name"] for s in alive_sids]
 
     actions = {}
     for sid, target in game_state["night_actions"].items():
         player = game_state["players"].get(sid)
-        if not player:
-            continue
+        if not player: continue
         actions[sid] = {
             "name": player["name"], "role": player["actual_role"], "perc_role": player["perceived_role"],
             "target": target, "blocked": False, "trapped": False
@@ -417,7 +495,8 @@ def check_night_end():
     for sid, p in game_state["players"].items():
         payload = {'msg': msg_str, 'dead': len(actual_deaths) > 0, 'personal_msgs': personal_msgs.get(sid, []), 'is_alive': p["alive"]}
         if not p["alive"]: payload["all_roles"] = all_roles_payload
-        emit('day_phase', payload, to=sid)
+        if p.get("connected", True):
+            emit('day_phase', payload, to=sid)
 
 @socketio.on('start_voting')
 def handle_start_voting():
@@ -432,7 +511,8 @@ def handle_start_voting():
     for sid, p in game_state["players"].items():
         payload = {'candidates': alive_players}
         if not p["alive"]: payload["all_roles"] = all_roles_payload
-        emit('voting_started', payload, to=sid)
+        if p.get("connected", True):
+            emit('voting_started', payload, to=sid)
 
 @socketio.on('submit_vote')
 def handle_submit_vote(data):
@@ -445,27 +525,32 @@ def handle_submit_vote(data):
     if target == voter_name: return
     
     game_state["votes"][sid] = target
+    evaluate_votes_if_ready()
+
+def evaluate_votes_if_ready():
     alive_sids = [s for s, p in game_state["players"].items() if p["alive"]]
+    connected_alive_sids = [s for s in alive_sids if game_state["players"][s].get("connected", True)]
     
-    if len(game_state["votes"]) >= len(alive_sids): evaluate_votes()
+    if not connected_alive_sids: return
+    
+    votes_submitted = [s for s in game_state["votes"] if s in connected_alive_sids]
+    if len(votes_submitted) >= len(connected_alive_sids):
+        evaluate_votes()
 
 def evaluate_votes():
     vote_points, vote_details = {}, {}
 
     for sid, target in game_state["votes"].items():
         player = game_state["players"].get(sid)
-        if not player:
-            continue
+        if not player: continue
         voter_name = player["name"]
         vote_points[target] = vote_points.get(target, 0) + 1
         vote_details.setdefault(target, []).append(voter_name)
 
-    if not vote_points:
-        return
+    if not vote_points: return
 
     eliminated = max(vote_points, key=vote_points.get)
     
-    # NOVINKA: Logika pro přeskočení hlasování
     if eliminated == "__SKIP__":
         res_str = f"<div class='text-2xl font-black text-slate-300 mb-2'><i class='fa-solid fa-person-walking-arrow-right mr-2'></i> Město se rozhodlo <span class='text-white'>přeskočit hlasování</span>. Nikdo nebyl oběšen!</div>"
     else:
@@ -518,7 +603,7 @@ def check_win_condition(is_night=False, custom_msg=""):
     return False
 
 def get_player_info():
-    return [{"name": p["name"], "is_host": (sid == game_state["host_sid"])} for sid, p in game_state["players"].items()]
+    return [{"name": p["name"], "is_host": (sid == game_state["host_sid"]), "connected": p.get("connected", True)} for sid, p in game_state["players"].items()]
 
 if __name__ == '__main__':
     debug_mode = os.environ.get('FLASK_DEBUG', '0') == '1'
